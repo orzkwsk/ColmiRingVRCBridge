@@ -1,0 +1,185 @@
+<Window x:Class="ColmiRingVRCBridge.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ColmiRingVRCBridge - Initial PoC"
+        Width="760" Height="860"
+        MinWidth="700" MinHeight="720"
+        WindowStartupLocation="CenterScreen"
+        Closing="Window_Closing">
+    <DockPanel Margin="16">
+        <Border DockPanel.Dock="Bottom" BorderThickness="1,1,0,0" BorderBrush="#DDD" Padding="0,10,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="StatusTextBlock" Text="Ready" VerticalAlignment="Center"/>
+                <TextBlock x:Name="VersionTextBlock" Grid.Column="1" Text="PoC 0.1.0" Foreground="Gray"/>
+            </Grid>
+        </Border>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel>
+                <TextBlock Text="ColmiRingVRCBridge" FontSize="24" FontWeight="SemiBold"/>
+                <TextBlock Margin="0,2,0,16" Foreground="Gray"
+                           Text="COLMI R06 target / BLE heart-rate to VRChat OSC"/>
+
+                <GroupBox Header="1. Ring selection / connection">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="135"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="BLE device" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="RingComboBox" Grid.Row="0" Grid.Column="1" Margin="0,0,8,0"
+                                  DisplayMemberPath="DisplayText"/>
+                        <Button x:Name="ScanButton" Grid.Row="0" Grid.Column="2" Content="Scan / Rescan"
+                                Click="ScanButton_Click" MinWidth="105"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Connection" Margin="0,10,0,0" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="ConnectionTextBlock" Grid.Row="1" Grid.Column="1" Margin="0,10,8,0"
+                                   Text="Disconnected" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                        <Button x:Name="ConnectButton" Grid.Row="1" Grid.Column="2" Margin="0,8,0,0"
+                                Content="Connect" Click="ConnectButton_Click" MinWidth="105"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Bluetooth ID" Margin="0,10,0,0"/>
+                        <TextBlock x:Name="BluetoothIdTextBlock" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
+                                   Margin="0,10,0,0" Text="—" FontFamily="Consolas"/>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Serial / Model" Margin="0,6,0,0"/>
+                        <TextBlock x:Name="SerialModelTextBlock" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="2"
+                                   Margin="0,6,0,0" Text="—" FontFamily="Consolas"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="HW / FW" Margin="0,6,0,0"/>
+                        <TextBlock x:Name="HwFwTextBlock" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2"
+                                   Margin="0,6,0,0" Text="—" FontFamily="Consolas"/>
+
+                        <TextBlock Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" Foreground="Gray"
+                                   Text="Scan filters for QRing/COLMI-like names or the known UART GATT service."/>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="2. Ring telemetry">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="135"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="135"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Heart rate" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="HeartRateTextBlock" Grid.Row="0" Grid.Column="1" Text="— BPM"
+                                   FontSize="20" FontWeight="SemiBold"/>
+
+                        <TextBlock Grid.Row="0" Grid.Column="2" Text="Battery" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="BatteryTextBlock" Grid.Row="0" Grid.Column="3" Text="— %"
+                                   FontSize="20" FontWeight="SemiBold"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="Last HR" Margin="0,8,0,0"/>
+                        <TextBlock x:Name="LastHeartRateTextBlock" Grid.Row="1" Grid.Column="1" Margin="0,8,0,0" Text="—"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="2" Text="Charging" Margin="0,8,0,0"/>
+                        <TextBlock x:Name="ChargingTextBlock" Grid.Row="1" Grid.Column="3" Margin="0,8,0,0" Text="—"/>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="3. VRChat OSC output">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="135"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="130"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBlock Grid.Row="0" Grid.Column="0" Text="Parameter name" VerticalAlignment="Center"/>
+                        <TextBox x:Name="ParameterNameTextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3"
+                                 Text="HeartRate" TextChanged="ParameterNameTextBox_TextChanged"/>
+
+                        <TextBlock Grid.Row="1" Grid.Column="0" Text="OSC address" Margin="0,8,0,0"/>
+                        <TextBlock x:Name="OscAddressPreviewTextBlock" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3"
+                                   Margin="0,8,0,0" Text="/avatar/parameters/HeartRate" FontFamily="Consolas"/>
+
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Parameter type" Margin="0,8,0,0" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="OscTypeComboBox" Grid.Row="2" Grid.Column="1" Margin="0,8,10,0" SelectedIndex="0"
+                                  SelectionChanged="OscTypeComboBox_SelectionChanged">
+                            <ComboBoxItem Content="Float (OSC f)" Tag="Float"/>
+                            <ComboBoxItem Content="Int (OSC i)" Tag="Int"/>
+                        </ComboBox>
+                        <TextBlock Grid.Row="2" Grid.Column="2" Text="Scaling" Margin="0,8,8,0" VerticalAlignment="Center"/>
+                        <ComboBox x:Name="ScalingComboBox" Grid.Row="2" Grid.Column="3" Margin="0,8,0,0" SelectedIndex="0">
+                            <ComboBoxItem Content="0..255 → 0..1" Tag="Normalize255"/>
+                            <ComboBoxItem Content="Raw BPM" Tag="RawBpm"/>
+                        </ComboBox>
+
+                        <TextBlock Grid.Row="3" Grid.Column="0" Text="Target" Margin="0,8,0,0" VerticalAlignment="Center"/>
+                        <TextBox x:Name="OscHostTextBox" Grid.Row="3" Grid.Column="1" Margin="0,8,10,0" Text="127.0.0.1"/>
+                        <TextBlock Grid.Row="3" Grid.Column="2" Text="Port" Margin="0,8,8,0" VerticalAlignment="Center"/>
+                        <TextBox x:Name="OscPortTextBox" Grid.Row="3" Grid.Column="3" Margin="0,8,0,0" Text="9000"
+                                 PreviewTextInput="IntegerTextBox_PreviewTextInput"/>
+
+                        <TextBlock Grid.Row="4" Grid.Column="0" Text="Output interval" Margin="0,8,0,0" VerticalAlignment="Center"/>
+                        <TextBox x:Name="OutputIntervalTextBox" Grid.Row="4" Grid.Column="1" Margin="0,8,10,0" Text="3.0"/>
+                        <TextBlock Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="2" Margin="0,8,0,0" Foreground="Gray"
+                                   Text="seconds (default: 3.0)" VerticalAlignment="Center"/>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="4. Dummy / test input">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="135"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="135"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <CheckBox x:Name="DummyCheckBox" Grid.Column="0" Grid.ColumnSpan="2"
+                                  Content="Use dummy BPM instead of ring data"
+                                  Checked="DummyCheckBox_Changed" Unchecked="DummyCheckBox_Changed"/>
+                        <TextBlock Grid.Column="2" Text="Dummy BPM" VerticalAlignment="Center"/>
+                        <TextBox x:Name="DummyBpmTextBox" Grid.Column="3" Text="72" IsEnabled="False"
+                                 PreviewTextInput="IntegerTextBox_PreviewTextInput"
+                                 TextChanged="DummyBpmTextBox_TextChanged"/>
+                    </Grid>
+                </GroupBox>
+
+                <GroupBox Header="5. Output control">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock x:Name="OutputStateTextBlock" Text="OSC output stopped" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="LastOutputTextBlock" Margin="0,6,0,0" Text="Last output: —" FontFamily="Consolas"/>
+                        </StackPanel>
+                        <Button x:Name="OutputButton" Grid.Column="1" Content="Start OSC output"
+                                Click="OutputButton_Click" MinWidth="150" MinHeight="40"/>
+                    </Grid>
+                </GroupBox>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
+</Window>
