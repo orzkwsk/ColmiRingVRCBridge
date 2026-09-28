@@ -9,6 +9,7 @@ internal static class ColmiPacket
     public const byte RealtimeHeartRate = 0x01;
     public const byte RealtimeHeartRatePollType = 0x03;
     public const byte ActionStart = 0x01;
+    public const byte ActionContinue = 0x03;
 
     public static byte[] Build(byte command, params byte[] payload)
     {

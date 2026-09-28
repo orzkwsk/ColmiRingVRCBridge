@@ -38,9 +38,6 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
     public async Task<IReadOnlyList<RingDeviceCandidate>> ScanAsync(TimeSpan duration, CancellationToken cancellationToken = default)
     {
-        // Do not filter inside the advertisement callback. Windows Settings can show a cached
-        // device name even when an individual advertisement does not contain LocalName or the
-        // QRing UART service UUID. Filtering there caused visible R06 devices to be discarded.
         var observed = new ConcurrentDictionary<ulong, RingDeviceCandidate>();
         var knownService = new ConcurrentDictionary<ulong, bool>();
         var watcher = new BluetoothLEAdvertisementWatcher
@@ -88,9 +85,6 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             var name = observedDevice.Name;
             var hasKnownService = knownService.TryGetValue(observedDevice.BluetoothAddress, out var serviceSeen) && serviceSeen;
 
-            // If the advertisement itself was insufficient to identify the ring, ask Windows for
-            // its resolved/cached BluetoothLEDevice name. This mirrors why the device can appear
-            // in Windows Bluetooth UI while LocalName is empty in the received advertisement.
             if (!hasKnownService && !LooksLikeColmiRing(name))
             {
                 BluetoothLEDevice? resolvedDevice = null;
@@ -104,8 +98,6 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
                 }
                 catch
                 {
-                    // A nearby BLE advertiser may disappear while resolving it. That is not a
-                    // scan failure; simply leave it out unless it was already positively matched.
                 }
                 finally
                 {
@@ -224,12 +216,20 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         ConnectionChanged?.Invoke(false);
     }
 
-    public Task StartRealtimeHeartRateAsync()
+    public async Task StartRealtimeHeartRateAsync()
     {
-        return WritePacketAsync(ColmiPacket.Build(
+        // QRing starts a realtime measurement session, then sends CONTINUE shortly after.
+        await WritePacketAsync(ColmiPacket.Build(
             ColmiPacket.CommandStartRealtime,
             ColmiPacket.RealtimeHeartRate,
-            ColmiPacket.ActionStart));
+            ColmiPacket.ActionStart)).ConfigureAwait(false);
+
+        await Task.Delay(TimeSpan.FromMilliseconds(500)).ConfigureAwait(false);
+
+        await WritePacketAsync(ColmiPacket.Build(
+            ColmiPacket.CommandStartRealtime,
+            ColmiPacket.RealtimeHeartRate,
+            ColmiPacket.ActionContinue)).ConfigureAwait(false);
     }
 
     public Task StopRealtimeHeartRateAsync()
@@ -243,8 +243,6 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
     public Task RequestRealtimeHeartRateAsync()
     {
-        // QRing-compatible firmware exposes the ring-computed BPM through command 0x1E.
-        // Payload 0x03 is the poll type observed in the vendor app / existing clients.
         return WritePacketAsync(ColmiPacket.Build(
             ColmiPacket.CommandRealtimeHeartRate,
             ColmiPacket.RealtimeHeartRatePollType));
@@ -297,8 +295,6 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         switch (data[0])
         {
             case ColmiPacket.CommandRealtimeHeartRate:
-                // Command 0x1E returns the firmware-computed BPM in byte 1.
-                // Zero means the estimator has not produced a value yet.
                 if (data[1] > 0)
                 {
                     HeartRateUpdated?.Invoke(data[1]);
@@ -306,8 +302,6 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
                 break;
 
             case ColmiPacket.CommandStartRealtime:
-                // Keep support for firmware variants that also expose a usable value in the
-                // realtime-session notification. The explicit 0x1E poll above is authoritative.
                 if (data[1] == ColmiPacket.RealtimeHeartRate && data[2] == 0x00 && data[3] > 0)
                 {
                     HeartRateUpdated?.Invoke(data[3]);
