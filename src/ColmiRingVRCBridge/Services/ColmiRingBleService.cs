@@ -29,12 +29,28 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     private CancellationTokenSource? _batteryPollingCts;
     private Task? _batteryPollingTask;
 
+    private long _lastValidNotificationUnixMs;
+    private long _lastValidHeartRateUnixMs;
+    private long _heartRatePollTxCount;
+    private long _heartRatePollWriteFailureCount;
+    private int _consecutiveHeartRatePollFailures;
+
     public event Action<int>? HeartRateUpdated;
     public event Action<BatteryState>? BatteryUpdated;
     public event Action<bool>? ConnectionChanged;
     public event Action<string>? ProtocolWarning;
 
     public bool IsConnected => _device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
+
+    public BleTelemetryDiagnostics GetTelemetryDiagnostics()
+    {
+        return new BleTelemetryDiagnostics(
+            ToNullableTimestamp(Volatile.Read(ref _lastValidNotificationUnixMs)),
+            ToNullableTimestamp(Volatile.Read(ref _lastValidHeartRateUnixMs)),
+            Interlocked.Read(ref _heartRatePollTxCount),
+            Interlocked.Read(ref _heartRatePollWriteFailureCount),
+            Volatile.Read(ref _consecutiveHeartRatePollFailures));
+    }
 
     public async Task<IReadOnlyList<RingDeviceCandidate>> ScanAsync(TimeSpan duration, CancellationToken cancellationToken = default)
     {
@@ -123,6 +139,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     public async Task<RingDeviceInfo> ConnectAsync(RingDeviceCandidate candidate)
     {
         await DisconnectAsync().ConfigureAwait(false);
+        ResetTelemetryDiagnostics();
 
         _device = await BluetoothLEDevice.FromBluetoothAddressAsync(candidate.BluetoothAddress);
         if (_device is null)
@@ -292,19 +309,21 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             return;
         }
 
+        Interlocked.Exchange(ref _lastValidNotificationUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
         switch (data[0])
         {
             case ColmiPacket.CommandRealtimeHeartRate:
                 if (data[1] > 0)
                 {
-                    HeartRateUpdated?.Invoke(data[1]);
+                    PublishHeartRate(data[1]);
                 }
                 break;
 
             case ColmiPacket.CommandStartRealtime:
                 if (data[1] == ColmiPacket.RealtimeHeartRate && data[2] == 0x00 && data[3] > 0)
                 {
-                    HeartRateUpdated?.Invoke(data[3]);
+                    PublishHeartRate(data[3]);
                 }
                 else if (data[2] != 0x00)
                 {
@@ -316,6 +335,12 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
                 BatteryUpdated?.Invoke(new BatteryState(data[1], data[2] != 0));
                 break;
         }
+    }
+
+    private void PublishHeartRate(int bpm)
+    {
+        Interlocked.Exchange(ref _lastValidHeartRateUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        HeartRateUpdated?.Invoke(bpm);
     }
 
     private void Device_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
@@ -333,24 +358,36 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
     private async Task HeartRatePollingLoopAsync(CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            while (!cancellationToken.IsCancellationRequested)
+            if (IsConnected)
             {
-                if (IsConnected)
+                try
                 {
                     await RequestRealtimeHeartRateAsync().ConfigureAwait(false);
+                    Interlocked.Increment(ref _heartRatePollTxCount);
+                    Interlocked.Exchange(ref _consecutiveHeartRatePollFailures, 0);
                 }
+                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+                {
+                    var consecutive = Interlocked.Increment(ref _consecutiveHeartRatePollFailures);
+                    Interlocked.Increment(ref _heartRatePollWriteFailureCount);
 
+                    if (consecutive == 1 || consecutive == 3 || consecutive % 10 == 0)
+                    {
+                        ProtocolWarning?.Invoke($"Heart-rate poll failed ({consecutive} consecutive): {ex.Message}");
+                    }
+                }
+            }
+
+            try
+            {
                 await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            ProtocolWarning?.Invoke($"Heart-rate polling stopped: {ex.Message}");
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
         }
     }
 
@@ -391,23 +428,30 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
     private async Task BatteryPollingLoopAsync(CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            while (!cancellationToken.IsCancellationRequested)
+            try
             {
                 await Task.Delay(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
-                if (IsConnected)
-                {
-                    await RequestBatteryAsync().ConfigureAwait(false);
-                }
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception ex)
-        {
-            ProtocolWarning?.Invoke($"Battery polling stopped: {ex.Message}");
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
+
+            if (!IsConnected)
+            {
+                continue;
+            }
+
+            try
+            {
+                await RequestBatteryAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+            {
+                ProtocolWarning?.Invoke($"Battery poll failed: {ex.Message}");
+            }
         }
     }
 
@@ -495,6 +539,22 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
                upper.StartsWith("R09", StringComparison.Ordinal) ||
                upper.StartsWith("R10", StringComparison.Ordinal) ||
                upper.StartsWith("R12", StringComparison.Ordinal);
+    }
+
+    private void ResetTelemetryDiagnostics()
+    {
+        Interlocked.Exchange(ref _lastValidNotificationUnixMs, 0);
+        Interlocked.Exchange(ref _lastValidHeartRateUnixMs, 0);
+        Interlocked.Exchange(ref _heartRatePollTxCount, 0);
+        Interlocked.Exchange(ref _heartRatePollWriteFailureCount, 0);
+        Interlocked.Exchange(ref _consecutiveHeartRatePollFailures, 0);
+    }
+
+    private static DateTimeOffset? ToNullableTimestamp(long unixMilliseconds)
+    {
+        return unixMilliseconds <= 0
+            ? null
+            : DateTimeOffset.FromUnixTimeMilliseconds(unixMilliseconds);
     }
 
     public async ValueTask DisposeAsync()
