@@ -81,6 +81,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Heart rate" VerticalAlignment="Center"/>
@@ -97,7 +98,29 @@
                         <TextBlock Grid.Row="1" Grid.Column="2" Text="Charging" Margin="0,8,0,0"/>
                         <TextBlock x:Name="ChargingTextBlock" Grid.Row="1" Grid.Column="3" Margin="0,8,0,0" Text="—"/>
 
-                        <Border Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4"
+                        <Grid Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="24"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Minimum" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="MinHeartRateTextBlock" Grid.Column="1" Margin="8,0,0,0"
+                                       Text="— BPM" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="3" Text="Maximum" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="MaxHeartRateTextBlock" Grid.Column="4" Margin="8,0,0,0"
+                                       Text="— BPM" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <Button x:Name="ResetHeartRateStatsButton" Grid.Column="6"
+                                    Content="Reset" MinWidth="72" Padding="10,2"
+                                    Click="ResetHeartRateStatsButton_Click"
+                                    ToolTip="Clear heart-rate min/max and graph history."/>
+                        </Grid>
+
+                        <Border Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4"
                                 Height="120" Margin="0,14,0,0"
                                 BorderBrush="#D8D8D8" BorderThickness="1" CornerRadius="4"
                                 Background="#FAFAFA" ClipToBounds="True">
