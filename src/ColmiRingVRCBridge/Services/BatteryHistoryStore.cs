@@ -33,6 +33,8 @@ internal sealed class BatteryHistoryStore
 
     public void Add(BatteryState battery, DateTimeOffset timestamp)
     {
+        BatteryHistorySample[]? persistenceSnapshot = null;
+
         lock (_gate)
         {
             var sample = new BatteryHistorySample(timestamp, Math.Clamp(battery.Percent, 0, 100), battery.Charging);
@@ -49,8 +51,10 @@ internal sealed class BatteryHistoryStore
             }
 
             _samples.Add(sample);
-            SaveLocked();
+            persistenceSnapshot = _samples.ToArray();
         }
+
+        BatteryHistoryPersistenceQueue.Enqueue(_filePath, persistenceSnapshot);
     }
 
     public IReadOnlyList<BatteryHistorySample> Snapshot(DateTimeOffset now)
@@ -114,31 +118,6 @@ internal sealed class BatteryHistoryStore
         if (removeCount > 0)
         {
             _samples.RemoveRange(0, removeCount);
-        }
-    }
-
-    private void SaveLocked()
-    {
-        try
-        {
-            var tempPath = _filePath + ".tmp";
-            using (var writer = new StreamWriter(tempPath, append: false))
-            {
-                foreach (var sample in _samples)
-                {
-                    writer.Write(sample.Timestamp.ToUnixTimeMilliseconds().ToString(CultureInfo.InvariantCulture));
-                    writer.Write(',');
-                    writer.Write(sample.Percent.ToString(CultureInfo.InvariantCulture));
-                    writer.Write(',');
-                    writer.WriteLine(sample.Charging ? "1" : "0");
-                }
-            }
-
-            File.Move(tempPath, _filePath, overwrite: true);
-        }
-        catch
-        {
-            // Battery history is diagnostics-only. Never affect live telemetry on persistence failure.
         }
     }
 }
