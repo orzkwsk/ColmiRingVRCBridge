@@ -4,6 +4,8 @@ using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Threading;
 using ColmiRingVRCBridge.Models;
 using ColmiRingVRCBridge.Services;
 
@@ -12,9 +14,14 @@ namespace ColmiRingVRCBridge;
 public partial class MainWindow : Window
 {
     private static readonly Regex IntegerRegex = new("^[0-9]+$");
+    private static readonly TimeSpan HeartRateGraphWindow = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan HeartRateHistoryRetention = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan HeartRateGraphGapThreshold = TimeSpan.FromSeconds(3);
 
     private readonly ColmiRingBleService _ringService = new();
     private readonly OscOutputService _oscOutputService = new();
+    private readonly HeartRateHistoryBuffer _heartRateHistory = new(HeartRateHistoryRetention);
+    private readonly DispatcherTimer _heartRateGraphTimer;
     private int _latestHeartRate;
     private bool _hasHeartRate;
     private bool _dummyEnabled;
@@ -32,6 +39,13 @@ public partial class MainWindow : Window
 
         _oscOutputService.OutputSent += OscOutputService_OutputSent;
         _oscOutputService.OutputError += OscOutputService_OutputError;
+
+        _heartRateGraphTimer = new DispatcherTimer(DispatcherPriority.Background)
+        {
+            Interval = TimeSpan.FromSeconds(1)
+        };
+        _heartRateGraphTimer.Tick += (_, _) => RedrawHeartRateGraph();
+        _heartRateGraphTimer.Start();
     }
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
@@ -84,6 +98,9 @@ public partial class MainWindow : Window
                 return;
             }
 
+            _heartRateHistory.Clear();
+            RedrawHeartRateGraph();
+
             SetStatus($"Connecting to {selected.Name}...");
             BluetoothIdTextBlock.Text = selected.AddressText;
             var info = await _ringService.ConnectAsync(selected);
@@ -106,13 +123,16 @@ public partial class MainWindow : Window
 
     private void RingService_HeartRateUpdated(int bpm)
     {
+        var timestamp = DateTimeOffset.Now;
         _latestHeartRate = bpm;
         _hasHeartRate = true;
+        _heartRateHistory.Add(bpm, timestamp);
 
         Dispatcher.Invoke(() =>
         {
             HeartRateTextBlock.Text = $"{bpm} BPM";
-            LastHeartRateTextBlock.Text = DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+            LastHeartRateTextBlock.Text = timestamp.LocalDateTime.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+            RedrawHeartRateGraph();
         });
     }
 
@@ -146,6 +166,83 @@ public partial class MainWindow : Window
     private void RingService_ProtocolWarning(string message)
     {
         Dispatcher.Invoke(() => SetStatus($"BLE: {message}"));
+    }
+
+    private void HeartRateGraphCanvas_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        RedrawHeartRateGraph();
+    }
+
+    private void RedrawHeartRateGraph()
+    {
+        if (HeartRateGraphCanvas is null || HeartRateGraphPath is null || HeartRateGraphEmptyText is null)
+        {
+            return;
+        }
+
+        var width = HeartRateGraphCanvas.ActualWidth;
+        var height = HeartRateGraphCanvas.ActualHeight;
+        if (width <= 1 || height <= 1)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.Now;
+        var windowStart = now - HeartRateGraphWindow;
+        var samples = _heartRateHistory.Snapshot(windowStart)
+            .Where(sample => sample.Timestamp <= now)
+            .OrderBy(sample => sample.Timestamp)
+            .ToArray();
+
+        if (samples.Length == 0)
+        {
+            HeartRateGraphPath.Data = null;
+            HeartRateGraphEmptyText.Visibility = Visibility.Visible;
+            return;
+        }
+
+        HeartRateGraphEmptyText.Visibility = Visibility.Collapsed;
+
+        var minimum = samples.Min(sample => (double)sample.Bpm);
+        var maximum = samples.Max(sample => (double)sample.Bpm);
+        var center = (minimum + maximum) / 2.0;
+        var span = Math.Max(20.0, maximum - minimum);
+        var paddedSpan = span * 1.2;
+        var yMin = center - (paddedSpan / 2.0);
+        var yMax = center + (paddedSpan / 2.0);
+        var yRange = Math.Max(1.0, yMax - yMin);
+
+        Point ToPoint(HeartRateSample sample)
+        {
+            var xRatio = (sample.Timestamp - windowStart).TotalMilliseconds / HeartRateGraphWindow.TotalMilliseconds;
+            var x = Math.Clamp(xRatio, 0.0, 1.0) * width;
+            var yRatio = (sample.Bpm - yMin) / yRange;
+            var y = height - (Math.Clamp(yRatio, 0.0, 1.0) * height);
+            return new Point(x, y);
+        }
+
+        var geometry = new StreamGeometry();
+        using (var context = geometry.Open())
+        {
+            HeartRateSample? previous = null;
+            foreach (var sample in samples)
+            {
+                var point = ToPoint(sample);
+                if (previous is null || sample.Timestamp - previous.Value.Timestamp > HeartRateGraphGapThreshold)
+                {
+                    context.BeginFigure(point, isFilled: false, isClosed: false);
+                }
+                else
+                {
+                    context.LineTo(point, isStroked: true, isSmoothJoin: false);
+                }
+
+                previous = sample;
+            }
+        }
+
+        geometry.Freeze();
+        HeartRateGraphPath.Data = geometry;
     }
 
     private async void OutputButton_Click(object sender, RoutedEventArgs e)
@@ -341,6 +438,7 @@ public partial class MainWindow : Window
 
         e.Cancel = true;
         _closing = true;
+        _heartRateGraphTimer.Stop();
 
         try
         {
