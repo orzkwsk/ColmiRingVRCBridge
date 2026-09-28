@@ -24,6 +24,8 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     private GattDeviceService? _uartService;
     private GattCharacteristic? _rxCharacteristic;
     private GattCharacteristic? _txCharacteristic;
+    private CancellationTokenSource? _heartRatePollingCts;
+    private Task? _heartRatePollingTask;
     private CancellationTokenSource? _batteryPollingCts;
     private Task? _batteryPollingTask;
 
@@ -172,6 +174,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
         var deviceInfo = await ReadDeviceInfoAsync().ConfigureAwait(false);
         await StartRealtimeHeartRateAsync().ConfigureAwait(false);
+        StartHeartRatePolling();
         await RequestBatteryAsync().ConfigureAwait(false);
         StartBatteryPolling();
 
@@ -180,6 +183,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
     public async Task DisconnectAsync()
     {
+        await StopHeartRatePollingAsync().ConfigureAwait(false);
         await StopBatteryPollingAsync().ConfigureAwait(false);
 
         if (_rxCharacteristic is not null && IsConnected)
@@ -237,6 +241,15 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             0x00));
     }
 
+    public Task RequestRealtimeHeartRateAsync()
+    {
+        // QRing-compatible firmware exposes the ring-computed BPM through command 0x1E.
+        // Payload 0x03 is the poll type observed in the vendor app / existing clients.
+        return WritePacketAsync(ColmiPacket.Build(
+            ColmiPacket.CommandRealtimeHeartRate,
+            ColmiPacket.RealtimeHeartRatePollType));
+    }
+
     public Task RequestBatteryAsync()
     {
         return WritePacketAsync(ColmiPacket.Build(ColmiPacket.CommandBattery));
@@ -283,7 +296,18 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
         switch (data[0])
         {
+            case ColmiPacket.CommandRealtimeHeartRate:
+                // Command 0x1E returns the firmware-computed BPM in byte 1.
+                // Zero means the estimator has not produced a value yet.
+                if (data[1] > 0)
+                {
+                    HeartRateUpdated?.Invoke(data[1]);
+                }
+                break;
+
             case ColmiPacket.CommandStartRealtime:
+                // Keep support for firmware variants that also expose a usable value in the
+                // realtime-session notification. The explicit 0x1E poll above is authoritative.
                 if (data[1] == ColmiPacket.RealtimeHeartRate && data[2] == 0x00 && data[3] > 0)
                 {
                     HeartRateUpdated?.Invoke(data[3]);
@@ -303,6 +327,64 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     private void Device_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {
         ConnectionChanged?.Invoke(sender.ConnectionStatus == BluetoothConnectionStatus.Connected);
+    }
+
+    private void StartHeartRatePolling()
+    {
+        _heartRatePollingCts?.Cancel();
+        _heartRatePollingCts?.Dispose();
+        _heartRatePollingCts = new CancellationTokenSource();
+        _heartRatePollingTask = Task.Run(() => HeartRatePollingLoopAsync(_heartRatePollingCts.Token));
+    }
+
+    private async Task HeartRatePollingLoopAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                if (IsConnected)
+                {
+                    await RequestRealtimeHeartRateAsync().ConfigureAwait(false);
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception ex)
+        {
+            ProtocolWarning?.Invoke($"Heart-rate polling stopped: {ex.Message}");
+        }
+    }
+
+    private async Task StopHeartRatePollingAsync()
+    {
+        if (_heartRatePollingCts is null)
+        {
+            return;
+        }
+
+        var cts = _heartRatePollingCts;
+        var task = _heartRatePollingTask;
+        _heartRatePollingCts = null;
+        _heartRatePollingTask = null;
+        cts.Cancel();
+
+        if (task is not null)
+        {
+            try
+            {
+                await task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        cts.Dispose();
     }
 
     private void StartBatteryPolling()
