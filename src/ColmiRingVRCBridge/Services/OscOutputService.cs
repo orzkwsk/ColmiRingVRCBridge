@@ -73,9 +73,9 @@ internal sealed class OscOutputService : IAsyncDisposable
                     }
                     else
                     {
-                        var value = options.Scaling == ScalingMode.Normalize255
-                            ? (int)Math.Round(clampedBpm / 255.0, MidpointRounding.AwayFromZero)
-                            : clampedBpm;
+                        // Integer normalization would collapse BPM/255 to effectively 0 or 1.
+                        // Int output therefore always represents raw BPM regardless of the scaling flag.
+                        var value = clampedBpm;
                         outputValue = value;
                         await sender.SendIntAsync(options.OscAddress, value).ConfigureAwait(false);
                     }
