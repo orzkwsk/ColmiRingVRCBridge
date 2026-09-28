@@ -36,7 +36,11 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
     public async Task<IReadOnlyList<RingDeviceCandidate>> ScanAsync(TimeSpan duration, CancellationToken cancellationToken = default)
     {
-        var devices = new ConcurrentDictionary<ulong, RingDeviceCandidate>();
+        // Do not filter inside the advertisement callback. Windows Settings can show a cached
+        // device name even when an individual advertisement does not contain LocalName or the
+        // QRing UART service UUID. Filtering there caused visible R06 devices to be discarded.
+        var observed = new ConcurrentDictionary<ulong, RingDeviceCandidate>();
+        var knownService = new ConcurrentDictionary<ulong, bool>();
         var watcher = new BluetoothLEAdvertisementWatcher
         {
             ScanningMode = BluetoothLEScanningMode.Active
@@ -46,18 +50,19 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         {
             var name = args.Advertisement.LocalName ?? string.Empty;
             var hasKnownService = args.Advertisement.ServiceUuids.Contains(UartServiceUuid);
-            if (!hasKnownService && !LooksLikeColmiRing(name))
-            {
-                return;
-            }
 
-            devices.AddOrUpdate(
+            observed.AddOrUpdate(
                 args.BluetoothAddress,
                 _ => new RingDeviceCandidate(name, args.BluetoothAddress, args.RawSignalStrengthInDBm),
                 (_, existing) => new RingDeviceCandidate(
                     string.IsNullOrWhiteSpace(name) ? existing.Name : name,
                     args.BluetoothAddress,
                     args.RawSignalStrengthInDBm));
+
+            knownService.AddOrUpdate(
+                args.BluetoothAddress,
+                hasKnownService,
+                (_, existing) => existing || hasKnownService);
         }
 
         watcher.Received += OnReceived;
@@ -72,7 +77,50 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             watcher.Received -= OnReceived;
         }
 
-        return devices.Values
+        var candidates = new List<RingDeviceCandidate>();
+
+        foreach (var observedDevice in observed.Values.OrderByDescending(x => x.Rssi))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var name = observedDevice.Name;
+            var hasKnownService = knownService.TryGetValue(observedDevice.BluetoothAddress, out var serviceSeen) && serviceSeen;
+
+            // If the advertisement itself was insufficient to identify the ring, ask Windows for
+            // its resolved/cached BluetoothLEDevice name. This mirrors why the device can appear
+            // in Windows Bluetooth UI while LocalName is empty in the received advertisement.
+            if (!hasKnownService && !LooksLikeColmiRing(name))
+            {
+                BluetoothLEDevice? resolvedDevice = null;
+                try
+                {
+                    resolvedDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(observedDevice.BluetoothAddress);
+                    if (resolvedDevice is not null && !string.IsNullOrWhiteSpace(resolvedDevice.Name))
+                    {
+                        name = resolvedDevice.Name;
+                    }
+                }
+                catch
+                {
+                    // A nearby BLE advertiser may disappear while resolving it. That is not a
+                    // scan failure; simply leave it out unless it was already positively matched.
+                }
+                finally
+                {
+                    resolvedDevice?.Dispose();
+                }
+            }
+
+            if (hasKnownService || LooksLikeColmiRing(name))
+            {
+                candidates.Add(new RingDeviceCandidate(
+                    name,
+                    observedDevice.BluetoothAddress,
+                    observedDevice.Rssi));
+            }
+        }
+
+        return candidates
             .OrderByDescending(x => x.Rssi)
             .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
