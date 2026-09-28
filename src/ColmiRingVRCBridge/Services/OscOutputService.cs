@@ -73,11 +73,13 @@ internal sealed class OscOutputService : IAsyncDisposable
                     }
                     else
                     {
-                        // Integer normalization would collapse BPM/255 to effectively 0 or 1.
-                        // Int output therefore always represents raw BPM regardless of the scaling flag.
-                        var value = clampedBpm;
-                        outputValue = value;
-                        await sender.SendIntAsync(options.OscAddress, value).ConfigureAwait(false);
+                        if (options.Scaling != ScalingMode.RawBpm)
+                        {
+                            throw new InvalidOperationException("Integer OSC output requires raw BPM scaling.");
+                        }
+
+                        outputValue = clampedBpm;
+                        await sender.SendIntAsync(options.OscAddress, clampedBpm).ConfigureAwait(false);
                     }
 
                     OutputSent?.Invoke(clampedBpm, outputValue);
