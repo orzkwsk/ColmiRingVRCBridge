@@ -19,21 +19,9 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     private static readonly Guid FirmwareRevisionUuid = Guid.Parse("00002A26-0000-1000-8000-00805F9B34FB");
     private static readonly Guid HardwareRevisionUuid = Guid.Parse("00002A27-0000-1000-8000-00805F9B34FB");
 
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
     private BluetoothLEDevice? _device;
     private GattDeviceService? _uartService;
-    private GattCharacteristic? _rxCharacteristic;
-    private GattCharacteristic? _txCharacteristic;
-    private CancellationTokenSource? _heartRatePollingCts;
-    private Task? _heartRatePollingTask;
-    private CancellationTokenSource? _batteryPollingCts;
-    private Task? _batteryPollingTask;
-
-    private long _lastValidNotificationUnixMs;
-    private long _lastValidHeartRateUnixMs;
-    private long _heartRatePollTxCount;
-    private long _heartRatePollWriteFailureCount;
-    private int _consecutiveHeartRatePollFailures;
+    private R06Session? _session;
 
     public event Action<int>? HeartRateUpdated;
     public event Action<BatteryState>? BatteryUpdated;
@@ -44,12 +32,18 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
     public BleTelemetryDiagnostics GetTelemetryDiagnostics()
     {
-        return new BleTelemetryDiagnostics(
-            ToNullableTimestamp(Volatile.Read(ref _lastValidNotificationUnixMs)),
-            ToNullableTimestamp(Volatile.Read(ref _lastValidHeartRateUnixMs)),
-            Interlocked.Read(ref _heartRatePollTxCount),
-            Interlocked.Read(ref _heartRatePollWriteFailureCount),
-            Volatile.Read(ref _consecutiveHeartRatePollFailures));
+        return _session?.GetDiagnostics() ?? BleTelemetryDiagnostics.Empty;
+    }
+
+    public HeartRateTelemetryState GetTelemetryState(DateTimeOffset now, TimeSpan staleAfter)
+    {
+        if (!IsConnected)
+        {
+            return HeartRateTelemetryState.Disconnected;
+        }
+
+        return _session?.GetTelemetryState(true, now, staleAfter)
+               ?? HeartRateTelemetryState.Initializing;
     }
 
     public async Task<IReadOnlyList<RingDeviceCandidate>> ScanAsync(TimeSpan duration, CancellationToken cancellationToken = default)
@@ -136,12 +130,16 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             .ToArray();
     }
 
-    public async Task<RingDeviceInfo> ConnectAsync(RingDeviceCandidate candidate)
+    public async Task<RingDeviceInfo> ConnectAsync(
+        RingDeviceCandidate candidate,
+        CancellationToken cancellationToken = default)
     {
         await DisconnectAsync().ConfigureAwait(false);
-        ResetTelemetryDiagnostics();
+        cancellationToken.ThrowIfCancellationRequested();
 
         _device = await BluetoothLEDevice.FromBluetoothAddressAsync(candidate.BluetoothAddress);
+        cancellationToken.ThrowIfCancellationRequested();
+
         if (_device is null)
         {
             throw new InvalidOperationException("Windows could not open the selected BLE device.");
@@ -149,74 +147,53 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
         _device.ConnectionStatusChanged += Device_ConnectionStatusChanged;
 
-        var services = await _device.GetGattServicesForUuidAsync(UartServiceUuid, BluetoothCacheMode.Uncached);
-        if (services.Status != GattCommunicationStatus.Success || services.Services.Count == 0)
+        try
+        {
+            var services = await _device.GetGattServicesForUuidAsync(UartServiceUuid, BluetoothCacheMode.Uncached);
+            cancellationToken.ThrowIfCancellationRequested();
+            if (services.Status != GattCommunicationStatus.Success || services.Services.Count == 0)
+            {
+                throw new InvalidOperationException("COLMI UART GATT service was not found on the selected device.");
+            }
+
+            _uartService = services.Services[0];
+
+            var rxResult = await _uartService.GetCharacteristicsForUuidAsync(UartRxUuid, BluetoothCacheMode.Uncached);
+            var txResult = await _uartService.GetCharacteristicsForUuidAsync(UartTxUuid, BluetoothCacheMode.Uncached);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (rxResult.Status != GattCommunicationStatus.Success || rxResult.Characteristics.Count == 0 ||
+                txResult.Status != GattCommunicationStatus.Success || txResult.Characteristics.Count == 0)
+            {
+                throw new InvalidOperationException("COLMI UART RX/TX characteristics were not found.");
+            }
+
+            var transport = new GattColmiTransport(rxResult.Characteristics[0], txResult.Characteristics[0]);
+            var session = new R06Session(transport);
+            HookSession(session);
+            _session = session;
+
+            var deviceInfo = await ReadDeviceInfoAsync().ConfigureAwait(false);
+            await session.StartAsync(cancellationToken).ConfigureAwait(false);
+
+            ConnectionChanged?.Invoke(true);
+            return deviceInfo;
+        }
+        catch
         {
             await DisconnectAsync().ConfigureAwait(false);
-            throw new InvalidOperationException("COLMI UART GATT service was not found on the selected device.");
+            throw;
         }
-
-        _uartService = services.Services[0];
-
-        var rxResult = await _uartService.GetCharacteristicsForUuidAsync(UartRxUuid, BluetoothCacheMode.Uncached);
-        var txResult = await _uartService.GetCharacteristicsForUuidAsync(UartTxUuid, BluetoothCacheMode.Uncached);
-        if (rxResult.Status != GattCommunicationStatus.Success || rxResult.Characteristics.Count == 0 ||
-            txResult.Status != GattCommunicationStatus.Success || txResult.Characteristics.Count == 0)
-        {
-            await DisconnectAsync().ConfigureAwait(false);
-            throw new InvalidOperationException("COLMI UART RX/TX characteristics were not found.");
-        }
-
-        _rxCharacteristic = rxResult.Characteristics[0];
-        _txCharacteristic = txResult.Characteristics[0];
-        _txCharacteristic.ValueChanged += TxCharacteristic_ValueChanged;
-
-        var notifyStatus = await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-            GattClientCharacteristicConfigurationDescriptorValue.Notify);
-        if (notifyStatus != GattCommunicationStatus.Success)
-        {
-            await DisconnectAsync().ConfigureAwait(false);
-            throw new InvalidOperationException($"Failed to enable BLE notifications: {notifyStatus}");
-        }
-
-        ConnectionChanged?.Invoke(true);
-
-        var deviceInfo = await ReadDeviceInfoAsync().ConfigureAwait(false);
-        await StartRealtimeHeartRateAsync().ConfigureAwait(false);
-        StartHeartRatePolling();
-        await RequestBatteryAsync().ConfigureAwait(false);
-        StartBatteryPolling();
-
-        return deviceInfo;
     }
 
     public async Task DisconnectAsync()
     {
-        await StopHeartRatePollingAsync().ConfigureAwait(false);
-        await StopBatteryPollingAsync().ConfigureAwait(false);
-
-        if (_rxCharacteristic is not null && IsConnected)
+        var session = _session;
+        _session = null;
+        if (session is not null)
         {
-            try
-            {
-                await StopRealtimeHeartRateAsync().ConfigureAwait(false);
-            }
-            catch
-            {
-            }
-        }
-
-        if (_txCharacteristic is not null)
-        {
-            _txCharacteristic.ValueChanged -= TxCharacteristic_ValueChanged;
-            try
-            {
-                await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                    GattClientCharacteristicConfigurationDescriptorValue.None);
-            }
-            catch
-            {
-            }
+            UnhookSession(session);
+            await session.DisposeAsync().ConfigureAwait(false);
         }
 
         if (_device is not null)
@@ -224,262 +201,40 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             _device.ConnectionStatusChanged -= Device_ConnectionStatusChanged;
         }
 
-        _txCharacteristic = null;
-        _rxCharacteristic = null;
         _uartService?.Dispose();
         _uartService = null;
         _device?.Dispose();
         _device = null;
+
         ConnectionChanged?.Invoke(false);
     }
 
-    public async Task StartRealtimeHeartRateAsync()
+    private void HookSession(R06Session session)
     {
-        // QRing starts a realtime measurement session, then sends CONTINUE shortly after.
-        await WritePacketAsync(ColmiPacket.Build(
-            ColmiPacket.CommandStartRealtime,
-            ColmiPacket.RealtimeHeartRate,
-            ColmiPacket.ActionStart)).ConfigureAwait(false);
-
-        await Task.Delay(TimeSpan.FromMilliseconds(500)).ConfigureAwait(false);
-
-        await WritePacketAsync(ColmiPacket.Build(
-            ColmiPacket.CommandStartRealtime,
-            ColmiPacket.RealtimeHeartRate,
-            ColmiPacket.ActionContinue)).ConfigureAwait(false);
+        session.HeartRateUpdated += Session_HeartRateUpdated;
+        session.BatteryUpdated += Session_BatteryUpdated;
+        session.ProtocolWarning += Session_ProtocolWarning;
     }
 
-    public Task StopRealtimeHeartRateAsync()
+    private void UnhookSession(R06Session session)
     {
-        return WritePacketAsync(ColmiPacket.Build(
-            ColmiPacket.CommandStopRealtime,
-            ColmiPacket.RealtimeHeartRate,
-            0x00,
-            0x00));
+        session.HeartRateUpdated -= Session_HeartRateUpdated;
+        session.BatteryUpdated -= Session_BatteryUpdated;
+        session.ProtocolWarning -= Session_ProtocolWarning;
     }
 
-    public Task RequestRealtimeHeartRateAsync()
-    {
-        return WritePacketAsync(ColmiPacket.Build(
-            ColmiPacket.CommandRealtimeHeartRate,
-            ColmiPacket.RealtimeHeartRatePollType));
-    }
+    private void Session_HeartRateUpdated(int bpm) => HeartRateUpdated?.Invoke(bpm);
 
-    public Task RequestBatteryAsync()
-    {
-        return WritePacketAsync(ColmiPacket.Build(ColmiPacket.CommandBattery));
-    }
+    private void Session_BatteryUpdated(BatteryState battery) => BatteryUpdated?.Invoke(battery);
 
-    private async Task WritePacketAsync(byte[] packet)
-    {
-        var characteristic = _rxCharacteristic ?? throw new InvalidOperationException("Ring is not connected.");
-
-        await _writeLock.WaitAsync().ConfigureAwait(false);
-        try
-        {
-            using var writer = new DataWriter();
-            writer.WriteBytes(packet);
-            var status = await characteristic.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse);
-            if (status != GattCommunicationStatus.Success)
-            {
-                throw new InvalidOperationException($"BLE write failed: {status}");
-            }
-        }
-        finally
-        {
-            _writeLock.Release();
-        }
-    }
-
-    private void TxCharacteristic_ValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
-    {
-        using var reader = DataReader.FromBuffer(args.CharacteristicValue);
-        var data = new byte[(int)reader.UnconsumedBufferLength];
-        reader.ReadBytes(data);
-
-        if (data.Length != 16)
-        {
-            ProtocolWarning?.Invoke($"Unexpected packet length: {data.Length}");
-            return;
-        }
-
-        if (!ColmiPacket.IsValid(data))
-        {
-            ProtocolWarning?.Invoke("Received packet with invalid checksum.");
-            return;
-        }
-
-        Interlocked.Exchange(ref _lastValidNotificationUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-
-        switch (data[0])
-        {
-            case ColmiPacket.CommandRealtimeHeartRate:
-                if (data[1] > 0)
-                {
-                    PublishHeartRate(data[1]);
-                }
-                break;
-
-            case ColmiPacket.CommandStartRealtime:
-                if (data[1] == ColmiPacket.RealtimeHeartRate && data[2] == 0x00 && data[3] > 0)
-                {
-                    PublishHeartRate(data[3]);
-                }
-                else if (data[2] != 0x00)
-                {
-                    ProtocolWarning?.Invoke($"Realtime HR error code: {data[2]}");
-                }
-                break;
-
-            case ColmiPacket.CommandBattery:
-                BatteryUpdated?.Invoke(new BatteryState(data[1], data[2] != 0));
-                break;
-        }
-    }
-
-    private void PublishHeartRate(int bpm)
-    {
-        Interlocked.Exchange(ref _lastValidHeartRateUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-        HeartRateUpdated?.Invoke(bpm);
-    }
+    private void Session_ProtocolWarning(string message) => ProtocolWarning?.Invoke(message);
 
     private void Device_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {
-        ConnectionChanged?.Invoke(sender.ConnectionStatus == BluetoothConnectionStatus.Connected);
-    }
-
-    private void StartHeartRatePolling()
-    {
-        _heartRatePollingCts?.Cancel();
-        _heartRatePollingCts?.Dispose();
-        _heartRatePollingCts = new CancellationTokenSource();
-        _heartRatePollingTask = Task.Run(() => HeartRatePollingLoopAsync(_heartRatePollingCts.Token));
-    }
-
-    private async Task HeartRatePollingLoopAsync(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
+        if (sender.ConnectionStatus == BluetoothConnectionStatus.Disconnected)
         {
-            if (IsConnected)
-            {
-                try
-                {
-                    await RequestRealtimeHeartRateAsync().ConfigureAwait(false);
-                    Interlocked.Increment(ref _heartRatePollTxCount);
-                    Interlocked.Exchange(ref _consecutiveHeartRatePollFailures, 0);
-                }
-                catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-                {
-                    var consecutive = Interlocked.Increment(ref _consecutiveHeartRatePollFailures);
-                    Interlocked.Increment(ref _heartRatePollWriteFailureCount);
-
-                    if (consecutive == 1 || consecutive == 3 || consecutive % 10 == 0)
-                    {
-                        ProtocolWarning?.Invoke($"Heart-rate poll failed ({consecutive} consecutive): {ex.Message}");
-                    }
-                }
-            }
-
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return;
-            }
+            ConnectionChanged?.Invoke(false);
         }
-    }
-
-    private async Task StopHeartRatePollingAsync()
-    {
-        if (_heartRatePollingCts is null)
-        {
-            return;
-        }
-
-        var cts = _heartRatePollingCts;
-        var task = _heartRatePollingTask;
-        _heartRatePollingCts = null;
-        _heartRatePollingTask = null;
-        cts.Cancel();
-
-        if (task is not null)
-        {
-            try
-            {
-                await task.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        cts.Dispose();
-    }
-
-    private void StartBatteryPolling()
-    {
-        _batteryPollingCts?.Cancel();
-        _batteryPollingCts?.Dispose();
-        _batteryPollingCts = new CancellationTokenSource();
-        _batteryPollingTask = Task.Run(() => BatteryPollingLoopAsync(_batteryPollingCts.Token));
-    }
-
-    private async Task BatteryPollingLoopAsync(CancellationToken cancellationToken)
-    {
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(60), cancellationToken).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                return;
-            }
-
-            if (!IsConnected)
-            {
-                continue;
-            }
-
-            try
-            {
-                await RequestBatteryAsync().ConfigureAwait(false);
-            }
-            catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
-            {
-                ProtocolWarning?.Invoke($"Battery poll failed: {ex.Message}");
-            }
-        }
-    }
-
-    private async Task StopBatteryPollingAsync()
-    {
-        if (_batteryPollingCts is null)
-        {
-            return;
-        }
-
-        var cts = _batteryPollingCts;
-        var task = _batteryPollingTask;
-        _batteryPollingCts = null;
-        _batteryPollingTask = null;
-        cts.Cancel();
-
-        if (task is not null)
-        {
-            try
-            {
-                await task.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
-        cts.Dispose();
     }
 
     private async Task<RingDeviceInfo> ReadDeviceInfoAsync()
@@ -541,25 +296,8 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
                upper.StartsWith("R12", StringComparison.Ordinal);
     }
 
-    private void ResetTelemetryDiagnostics()
-    {
-        Interlocked.Exchange(ref _lastValidNotificationUnixMs, 0);
-        Interlocked.Exchange(ref _lastValidHeartRateUnixMs, 0);
-        Interlocked.Exchange(ref _heartRatePollTxCount, 0);
-        Interlocked.Exchange(ref _heartRatePollWriteFailureCount, 0);
-        Interlocked.Exchange(ref _consecutiveHeartRatePollFailures, 0);
-    }
-
-    private static DateTimeOffset? ToNullableTimestamp(long unixMilliseconds)
-    {
-        return unixMilliseconds <= 0
-            ? null
-            : DateTimeOffset.FromUnixTimeMilliseconds(unixMilliseconds);
-    }
-
     public async ValueTask DisposeAsync()
     {
         await DisconnectAsync().ConfigureAwait(false);
-        _writeLock.Dispose();
     }
 }
