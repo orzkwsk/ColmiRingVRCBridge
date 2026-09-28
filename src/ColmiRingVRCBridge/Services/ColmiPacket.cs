@@ -6,8 +6,17 @@ internal static class ColmiPacket
     public const byte CommandRealtimeHeartRate = 0x1E;
     public const byte CommandStartRealtime = 0x69;
     public const byte CommandStopRealtime = 0x6A;
-    public const byte RealtimeHeartRate = 0x01;
-    public const byte RealtimeHeartRatePollType = 0x03;
+
+    // QRing protocol exposes both the ordinary HR measurement (0x01) and a
+    // dedicated real-time HR measurement type (0x06). R06 testing shows the
+    // ordinary type behaves like a finite measurement and stops after a few
+    // readings, so the bridge uses the dedicated continuous type.
+    public const byte RealtimeHeartRate = 0x06;
+
+    // Older QRing/R02-family implementations send ASCII '3' (0x33) with
+    // command 0x1E when requesting the current computed heart rate.
+    public const byte RealtimeHeartRatePollType = 0x33;
+
     public const byte ActionStart = 0x01;
     public const byte ActionContinue = 0x03;
 
