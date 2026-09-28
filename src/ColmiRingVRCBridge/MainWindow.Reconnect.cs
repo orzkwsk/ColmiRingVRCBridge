@@ -28,6 +28,7 @@ public partial class MainWindow
         }
 
         _reconnectUiInitialized = true;
+        InstallNonBlockingTelemetryUi();
 
         var settings = ReconnectSettingsStore.Load();
         if (settings.BluetoothAddress.HasValue)
@@ -289,6 +290,7 @@ public partial class MainWindow
     {
         CancelReconnectLoop();
         SaveReconnectSettings();
+        UninstallNonBlockingTelemetryUi();
         _ringService.ConnectionChanged -= RingService_AutoReconnectConnectionChanged;
     }
 }
