@@ -11,6 +11,10 @@ public partial class MainWindow
             return;
         }
 
+#if DEBUG
+        InitializeDebugTelemetryLogging();
+#endif
+
         var diagnostics = _ringService.GetTelemetryDiagnostics();
         var now = DateTimeOffset.UtcNow;
         var telemetryState = _ringService.GetTelemetryState(now, HeartRateFreshnessThreshold);
