@@ -53,9 +53,38 @@ public sealed class R06SessionTests
         Assert.Equal(1L, diagnostics.InvalidPacketCount);
         Assert.Equal(2L, diagnostics.ValidPacketCount);
         Assert.Equal(1L, diagnostics.HeartRatePacketCount);
+        Assert.Equal(1L, diagnostics.BatteryPacketCount);
         Assert.NotNull(diagnostics.LastRawNotificationAt);
         Assert.NotNull(diagnostics.LastValidPacketAt);
         Assert.NotNull(diagnostics.LastValidHeartRateAt);
+        Assert.NotNull(diagnostics.LastBatteryPacketAt);
+    }
+
+    [Fact]
+    public async Task BatteryDiagnostics_TrackPollAndResponseSeparately()
+    {
+        await using var transport = new FakeTransport();
+        await using var session = new R06Session(
+            transport,
+            heartRatePollInterval: TimeSpan.FromHours(1),
+            batteryPollInterval: TimeSpan.FromHours(1),
+            handshakeDelay: TimeSpan.Zero);
+
+        await session.StartAsync();
+
+        var beforeResponse = session.GetDiagnostics();
+        Assert.NotNull(beforeResponse.LastBatteryPollAt);
+        Assert.Null(beforeResponse.LastBatteryPacketAt);
+        Assert.Equal(1L, beforeResponse.BatteryPollTxCount);
+        Assert.Equal(0L, beforeResponse.BatteryPacketCount);
+        Assert.Equal(0L, beforeResponse.BatteryPollWriteFailureCount);
+
+        transport.Inject(ColmiPacket.Build(ColmiPacket.CommandBattery, 88, 0));
+
+        var afterResponse = session.GetDiagnostics();
+        Assert.NotNull(afterResponse.LastBatteryPacketAt);
+        Assert.Equal(1L, afterResponse.BatteryPacketCount);
+        Assert.Equal(1L, afterResponse.BatteryPollTxCount);
     }
 
     [Fact]
