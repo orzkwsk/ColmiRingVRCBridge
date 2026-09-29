@@ -49,10 +49,10 @@ public sealed class R06SessionTests
         transport.Inject(ColmiPacket.Build(ColmiPacket.CommandRealtimeHeartRate, 71));
 
         var diagnostics = session.GetDiagnostics();
-        Assert.Equal(3, diagnostics.RawNotificationCount);
-        Assert.Equal(1, diagnostics.InvalidPacketCount);
-        Assert.Equal(2, diagnostics.ValidPacketCount);
-        Assert.Equal(1, diagnostics.HeartRatePacketCount);
+        Assert.Equal(3L, diagnostics.RawNotificationCount);
+        Assert.Equal(1L, diagnostics.InvalidPacketCount);
+        Assert.Equal(2L, diagnostics.ValidPacketCount);
+        Assert.Equal(1L, diagnostics.HeartRatePacketCount);
         Assert.NotNull(diagnostics.LastRawNotificationAt);
         Assert.NotNull(diagnostics.LastValidPacketAt);
         Assert.NotNull(diagnostics.LastValidHeartRateAt);
@@ -103,7 +103,7 @@ public sealed class R06SessionTests
             await Task.Delay(10);
         }
 
-        Assert.Fail("Timed out waiting for the expected session state.");
+        Assert.True(false, "Timed out waiting for the expected session state.");
     }
 
     private sealed class FakeTransport : IColmiTransport
