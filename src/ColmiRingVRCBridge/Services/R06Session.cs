@@ -19,13 +19,19 @@ internal sealed class R06Session : IAsyncDisposable
     private long _lastRawNotificationUnixMs;
     private long _lastValidPacketUnixMs;
     private long _lastValidHeartRateUnixMs;
+    private long _lastBatteryPollUnixMs;
+    private long _lastBatteryPacketUnixMs;
     private long _rawNotificationCount;
     private long _invalidPacketCount;
     private long _validPacketCount;
     private long _heartRatePacketCount;
+    private long _batteryPacketCount;
     private long _heartRatePollTxCount;
     private long _heartRatePollWriteFailureCount;
     private int _consecutiveHeartRatePollFailures;
+    private long _batteryPollTxCount;
+    private long _batteryPollWriteFailureCount;
+    private int _consecutiveBatteryPollFailures;
 
     public R06Session(
         IColmiTransport transport,
@@ -60,7 +66,7 @@ internal sealed class R06Session : IAsyncDisposable
             _transportStarted = true;
 
             await StartHeartRateSessionAsync(cancellationToken).ConfigureAwait(false);
-            await _transport.WriteAsync(R06Protocol.BuildBatteryPacket(), cancellationToken).ConfigureAwait(false);
+            await RequestBatteryAsync(cancellationToken).ConfigureAwait(false);
 
             // The caller token scopes connection/initialization only. Once initialization
             // succeeds, telemetry polling owns an independent lifetime until DisposeAsync().
@@ -104,13 +110,19 @@ internal sealed class R06Session : IAsyncDisposable
             ToNullableTimestamp(Volatile.Read(ref _lastRawNotificationUnixMs)),
             ToNullableTimestamp(Volatile.Read(ref _lastValidPacketUnixMs)),
             ToNullableTimestamp(Volatile.Read(ref _lastValidHeartRateUnixMs)),
+            ToNullableTimestamp(Volatile.Read(ref _lastBatteryPollUnixMs)),
+            ToNullableTimestamp(Volatile.Read(ref _lastBatteryPacketUnixMs)),
             Interlocked.Read(ref _rawNotificationCount),
             Interlocked.Read(ref _invalidPacketCount),
             Interlocked.Read(ref _validPacketCount),
             Interlocked.Read(ref _heartRatePacketCount),
+            Interlocked.Read(ref _batteryPacketCount),
             Interlocked.Read(ref _heartRatePollTxCount),
             Interlocked.Read(ref _heartRatePollWriteFailureCount),
             Volatile.Read(ref _consecutiveHeartRatePollFailures),
+            Interlocked.Read(ref _batteryPollTxCount),
+            Interlocked.Read(ref _batteryPollWriteFailureCount),
+            Volatile.Read(ref _consecutiveBatteryPollFailures),
             IsHeartRateSessionStarted);
     }
 
@@ -163,6 +175,8 @@ internal sealed class R06Session : IAsyncDisposable
 
         if (packet.Battery is { } battery)
         {
+            Interlocked.Exchange(ref _lastBatteryPacketUnixMs, nowUnixMs);
+            Interlocked.Increment(ref _batteryPacketCount);
             BatteryUpdated?.Invoke(battery);
         }
 
@@ -215,6 +229,24 @@ internal sealed class R06Session : IAsyncDisposable
         }
     }
 
+    private async Task RequestBatteryAsync(CancellationToken cancellationToken)
+    {
+        Interlocked.Exchange(ref _lastBatteryPollUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+
+        try
+        {
+            await _transport.WriteAsync(R06Protocol.BuildBatteryPacket(), cancellationToken).ConfigureAwait(false);
+            Interlocked.Increment(ref _batteryPollTxCount);
+            Interlocked.Exchange(ref _consecutiveBatteryPollFailures, 0);
+        }
+        catch
+        {
+            Interlocked.Increment(ref _batteryPollWriteFailureCount);
+            Interlocked.Increment(ref _consecutiveBatteryPollFailures);
+            throw;
+        }
+    }
+
     private async Task BatteryPollingLoopAsync(CancellationToken cancellationToken)
     {
         while (!cancellationToken.IsCancellationRequested)
@@ -222,7 +254,7 @@ internal sealed class R06Session : IAsyncDisposable
             try
             {
                 await Task.Delay(_batteryPollInterval, cancellationToken).ConfigureAwait(false);
-                await _transport.WriteAsync(R06Protocol.BuildBatteryPacket(), cancellationToken).ConfigureAwait(false);
+                await RequestBatteryAsync(cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -230,7 +262,11 @@ internal sealed class R06Session : IAsyncDisposable
             }
             catch (Exception ex)
             {
-                ProtocolWarning?.Invoke($"Battery poll failed: {ex.Message}");
+                var consecutive = Volatile.Read(ref _consecutiveBatteryPollFailures);
+                if (consecutive == 1 || consecutive == 3 || consecutive % 10 == 0)
+                {
+                    ProtocolWarning?.Invoke($"Battery poll failed ({consecutive} consecutive): {ex.Message}");
+                }
             }
         }
     }
