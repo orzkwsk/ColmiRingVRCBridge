@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ColmiRingVRCBridge", "src\ColmiRingVRCBridge\ColmiRingVRCBridge.csproj", "{A4C1A95E-9510-4E36-8D43-C90DBB4C1F06}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "ColmiRingVRCBridge.Tests", "tests\ColmiRingVRCBridge.Tests\ColmiRingVRCBridge.Tests.csproj", "{B2A657C1-78E8-4C74-9E85-71EB7EC5748D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -14,5 +16,9 @@ Global
 		{A4C1A95E-9510-4E36-8D43-C90DBB4C1F06}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{A4C1A95E-9510-4E36-8D43-C90DBB4C1F06}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A4C1A95E-9510-4E36-8D43-C90DBB4C1F06}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B2A657C1-78E8-4C74-9E85-71EB7EC5748D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B2A657C1-78E8-4C74-9E85-71EB7EC5748D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B2A657C1-78E8-4C74-9E85-71EB7EC5748D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B2A657C1-78E8-4C74-9E85-71EB7EC5748D}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
