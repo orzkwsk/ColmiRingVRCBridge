@@ -21,7 +21,7 @@ internal sealed class GattColmiTransport : IColmiTransport
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfDisposed();
         if (_started)
         {
             return;
@@ -34,7 +34,6 @@ internal sealed class GattColmiTransport : IColmiTransport
         {
             var status = await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
                 GattClientCharacteristicConfigurationDescriptorValue.Notify);
-            cancellationToken.ThrowIfCancellationRequested();
 
             if (status != GattCommunicationStatus.Success)
             {
@@ -42,17 +41,33 @@ internal sealed class GattColmiTransport : IColmiTransport
             }
 
             _started = true;
+            cancellationToken.ThrowIfCancellationRequested();
         }
         catch
         {
             _txCharacteristic.ValueChanged -= TxCharacteristic_ValueChanged;
+
+            if (_started)
+            {
+                try
+                {
+                    await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
+                        GattClientCharacteristicConfigurationDescriptorValue.None);
+                }
+                catch
+                {
+                }
+
+                _started = false;
+            }
+
             throw;
         }
     }
 
     public async Task WriteAsync(byte[] packet, CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfDisposed();
         if (!_started)
         {
             throw new InvalidOperationException("BLE transport is not started.");
@@ -85,6 +100,14 @@ internal sealed class GattColmiTransport : IColmiTransport
         var data = new byte[(int)reader.UnconsumedBufferLength];
         reader.ReadBytes(data);
         PacketReceived?.Invoke(data);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(GattColmiTransport));
+        }
     }
 
     public async ValueTask DisposeAsync()
