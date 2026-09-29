@@ -47,7 +47,7 @@ internal sealed class R06Session : IAsyncDisposable
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ThrowIfDisposed();
         if (_sessionCts is not null)
         {
             throw new InvalidOperationException("R06 session is already started.");
@@ -78,9 +78,13 @@ internal sealed class R06Session : IAsyncDisposable
     public async Task StartHeartRateSessionAsync(CancellationToken cancellationToken = default)
     {
         await _transport.WriteAsync(R06Protocol.BuildStartHeartRatePacket(), cancellationToken).ConfigureAwait(false);
+
+        // START has been accepted by the transport. Mark the session active here so a
+        // later CONTINUE/cancellation failure can still be cleaned up with STOP.
+        Volatile.Write(ref _heartRateSessionStarted, 1);
+
         await Task.Delay(_handshakeDelay, cancellationToken).ConfigureAwait(false);
         await _transport.WriteAsync(R06Protocol.BuildContinueHeartRatePacket(), cancellationToken).ConfigureAwait(false);
-        Volatile.Write(ref _heartRateSessionStarted, 1);
     }
 
     public async Task StopHeartRateSessionAsync(CancellationToken cancellationToken = default)
@@ -265,6 +269,14 @@ internal sealed class R06Session : IAsyncDisposable
         }
 
         cts.Dispose();
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(R06Session));
+        }
     }
 
     private static DateTimeOffset? ToNullableTimestamp(long unixMilliseconds)
