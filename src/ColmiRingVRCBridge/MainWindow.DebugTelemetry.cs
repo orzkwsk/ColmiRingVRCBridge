@@ -7,15 +7,24 @@ public partial class MainWindow
 {
     private static readonly TimeSpan DebugTelemetryLogInterval = TimeSpan.FromMinutes(1);
     private DebugTelemetryLogger? _debugTelemetryLogger;
+    private bool _debugTelemetryLoggingInitialized;
 
     private void InitializeDebugTelemetryLogging()
     {
+        if (_debugTelemetryLoggingInitialized)
+        {
+            return;
+        }
+
+        _debugTelemetryLoggingInitialized = true;
+
         try
         {
             _debugTelemetryLogger = new DebugTelemetryLogger(
                 CreateDebugTelemetrySnapshot,
                 DebugTelemetryLogInterval);
             _debugTelemetryLogger.Start();
+            Closed += MainWindow_DebugTelemetryClosed;
         }
         catch (Exception ex)
         {
@@ -78,6 +87,12 @@ public partial class MainWindow
     private void LogDebugTelemetryEvent(string type, object? data = null)
     {
         _debugTelemetryLogger?.LogEvent(type, data);
+    }
+
+    private async void MainWindow_DebugTelemetryClosed(object? sender, EventArgs e)
+    {
+        Closed -= MainWindow_DebugTelemetryClosed;
+        await ShutdownDebugTelemetryLoggingAsync();
     }
 
     private async Task ShutdownDebugTelemetryLoggingAsync()
