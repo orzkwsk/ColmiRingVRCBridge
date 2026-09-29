@@ -7,6 +7,8 @@ namespace ColmiRingVRCBridge;
 
 public partial class MainWindow
 {
+    // Operational requirement: keep trying to restore the upstream BLE source promptly.
+    // This is intentionally a fixed 1-second retry delay rather than exponential backoff.
     private static readonly TimeSpan ReconnectInterval = TimeSpan.FromSeconds(1);
 
     private enum ConnectionOperation
@@ -81,7 +83,7 @@ public partial class MainWindow
             IsChecked = enabled,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 8, 10, 0),
-            ToolTip = "Reconnect to the last successful Bluetooth address after disconnect."
+            ToolTip = "Keep restoring the last successful Bluetooth connection with a fixed 1-second retry delay."
         };
         _autoReconnectCheckBox.Checked += AutoReconnectCheckBox_Changed;
         _autoReconnectCheckBox.Unchecked += AutoReconnectCheckBox_Changed;
