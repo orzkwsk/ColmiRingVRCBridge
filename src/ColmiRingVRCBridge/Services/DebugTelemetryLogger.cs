@@ -58,7 +58,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
 
         _started = true;
         _cts = new CancellationTokenSource();
-        _writerTask = Task.Run(() => WriterLoopAsync(_cts.Token));
+        _writerTask = Task.Run(WriterLoopAsync);
         _snapshotTask = Task.Run(() => SnapshotLoopAsync(_cts.Token));
 
         LogEvent("logger_started", new
@@ -111,7 +111,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
         }
     }
 
-    private async Task WriterLoopAsync(CancellationToken cancellationToken)
+    private async Task WriterLoopAsync()
     {
         try
         {
@@ -127,15 +127,11 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
                 AutoFlush = true
             };
 
-            await foreach (var entry in _channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            await foreach (var entry in _channel.Reader.ReadAllAsync().ConfigureAwait(false))
             {
                 var line = JsonSerializer.Serialize(entry);
                 await writer.WriteLineAsync(line).ConfigureAwait(false);
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Normal shutdown. Any entries already flushed remain available for diagnosis.
         }
         catch (Exception ex)
         {
@@ -186,10 +182,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
         _snapshotTask = null;
         _writerTask = null;
 
-        if (cts is not null)
-        {
-            cts.Cancel();
-        }
+        cts?.Cancel();
 
         if (snapshotTask is not null)
         {
@@ -206,13 +199,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
 
         if (writerTask is not null)
         {
-            try
-            {
-                await writerTask.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
+            await writerTask.ConfigureAwait(false);
         }
 
         cts?.Dispose();
