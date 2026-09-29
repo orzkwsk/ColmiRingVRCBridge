@@ -9,13 +9,23 @@ public partial class MainWindow
 {
     private static readonly TimeSpan ReconnectInterval = TimeSpan.FromSeconds(1);
 
+    private enum ConnectionOperation
+    {
+        None,
+        ManualConnect,
+        ManualDisconnect,
+        AutoReconnect
+    }
+
+    private readonly SemaphoreSlim _reconnectControlLock = new(1, 1);
     private CheckBox? _autoReconnectCheckBox;
     private CancellationTokenSource? _reconnectLoopCts;
     private Task? _reconnectLoopTask;
     private RingDeviceCandidate? _lastReconnectCandidate;
     private RingDeviceCandidate? _reconnectAttemptCandidate;
     private ulong? _batteryHistoryAddress;
-    private bool _reconnectAttemptInProgress;
+    private ConnectionOperation _connectionOperation;
+    private bool _autoReconnectEnabled;
     private bool _reconnectUiInitialized;
 
     protected override void OnContentRendered(EventArgs e)
@@ -28,9 +38,9 @@ public partial class MainWindow
         }
 
         _reconnectUiInitialized = true;
-        InstallNonBlockingTelemetryUi();
 
         var settings = ReconnectSettingsStore.Load();
+        _autoReconnectEnabled = settings.AutoReconnect;
         if (settings.BluetoothAddress.HasValue)
         {
             _lastReconnectCandidate = new RingDeviceCandidate(
@@ -41,7 +51,7 @@ public partial class MainWindow
 
         InstallAutoReconnectToggle(settings.AutoReconnect);
         _ringService.ConnectionChanged += RingService_AutoReconnectConnectionChanged;
-        Closing += MainWindow_AutoReconnectClosing;
+        RefreshConnectionControls();
 
         if (AutoReconnectEnabled && _lastReconnectCandidate is not null && !_ringService.IsConnected)
         {
@@ -50,7 +60,7 @@ public partial class MainWindow
         }
     }
 
-    private bool AutoReconnectEnabled => _autoReconnectCheckBox?.IsChecked == true;
+    private bool AutoReconnectEnabled => _autoReconnectEnabled;
 
     private void InstallAutoReconnectToggle(bool enabled)
     {
@@ -71,7 +81,7 @@ public partial class MainWindow
             IsChecked = enabled,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 8, 10, 0),
-            ToolTip = "Reconnect to the last successful Bluetooth address every ~1 second after disconnect."
+            ToolTip = "Reconnect to the last successful Bluetooth address after disconnect."
         };
         _autoReconnectCheckBox.Checked += AutoReconnectCheckBox_Changed;
         _autoReconnectCheckBox.Unchecked += AutoReconnectCheckBox_Changed;
@@ -92,20 +102,44 @@ public partial class MainWindow
 
     private void AutoReconnectCheckBox_Changed(object sender, RoutedEventArgs e)
     {
-        SaveReconnectSettings();
+        var enabled = (sender as CheckBox)?.IsChecked == true;
+        _ = ApplyAutoReconnectSettingAsync(enabled);
+    }
 
-        if (!AutoReconnectEnabled)
+    private async Task ApplyAutoReconnectSettingAsync(bool enabled)
+    {
+        await _reconnectControlLock.WaitAsync();
+        try
         {
-            CancelReconnectLoop();
-            SetStatus(_ringService.IsConnected
-                ? "Auto reconnect disabled; current BLE connection remains active."
-                : "Auto reconnect disabled.");
-            return;
+            _autoReconnectEnabled = enabled;
+            SaveReconnectSettings();
+
+            if (!enabled)
+            {
+                await StopReconnectLoopAsync();
+                SetStatus(_ringService.IsConnected
+                    ? "Auto reconnect disabled; current BLE connection remains active."
+                    : "Auto reconnect disabled.");
+                return;
+            }
+
+            // Ensure an old cancelled loop cannot block the newly enabled state.
+            await StopReconnectLoopAsync();
+
+            if (!_ringService.IsConnected &&
+                _lastReconnectCandidate is not null &&
+                _connectionOperation == ConnectionOperation.None)
+            {
+                EnsureReconnectLoop();
+            }
         }
-
-        if (!_ringService.IsConnected && _lastReconnectCandidate is not null)
+        catch (Exception ex)
         {
-            EnsureReconnectLoop();
+            SetStatus($"Auto reconnect setting failed: {ex.Message}");
+        }
+        finally
+        {
+            _reconnectControlLock.Release();
         }
     }
 
@@ -127,23 +161,17 @@ public partial class MainWindow
                 if (candidate is not null)
                 {
                     _lastReconnectCandidate = candidate;
-                    _batteryHistoryAddress = candidate.BluetoothAddress;
+                    EnsureBatteryHistory(candidate.BluetoothAddress);
                     SaveReconnectSettings();
                 }
 
                 return;
             }
 
-            if (_reconnectAttemptInProgress || !AutoReconnectEnabled || _lastReconnectCandidate is null)
+            if (!AutoReconnectEnabled ||
+                _lastReconnectCandidate is null ||
+                _connectionOperation != ConnectionOperation.None)
             {
-                return;
-            }
-
-            // ConnectButton_Click disables the button around intentional UI actions.
-            // Wait for that operation to finish before deciding whether a reconnect is still needed.
-            if (!ConnectButton.IsEnabled)
-            {
-                _ = WaitForConnectionUiActionAsync();
                 return;
             }
 
@@ -151,17 +179,20 @@ public partial class MainWindow
         }));
     }
 
-    private async Task WaitForConnectionUiActionAsync()
+    private void SetConnectionOperation(ConnectionOperation operation)
     {
-        while (!_closing && !ConnectButton.IsEnabled)
-        {
-            await Task.Delay(TimeSpan.FromMilliseconds(100));
-        }
+        _connectionOperation = operation;
+        RefreshConnectionControls();
+    }
 
-        if (!_closing && AutoReconnectEnabled && !_ringService.IsConnected && _lastReconnectCandidate is not null)
-        {
-            EnsureReconnectLoop();
-        }
+    private void RefreshConnectionControls(bool? connected = null)
+    {
+        var linkConnected = connected ?? _ringService.IsConnected;
+        var busy = _connectionOperation != ConnectionOperation.None;
+
+        ConnectButton.IsEnabled = !busy;
+        RingComboBox.IsEnabled = !linkConnected && !busy;
+        ScanButton.IsEnabled = !linkConnected && !busy;
     }
 
     private void EnsureReconnectLoop()
@@ -170,6 +201,7 @@ public partial class MainWindow
             !AutoReconnectEnabled ||
             _lastReconnectCandidate is null ||
             _ringService.IsConnected ||
+            _connectionOperation != ConnectionOperation.None ||
             (_reconnectLoopTask is not null && !_reconnectLoopTask.IsCompleted))
         {
             return;
@@ -201,14 +233,19 @@ public partial class MainWindow
                 return;
             }
 
+            if (_connectionOperation != ConnectionOperation.None)
+            {
+                continue;
+            }
+
             var candidate = _lastReconnectCandidate;
             if (candidate is null)
             {
                 return;
             }
 
-            _reconnectAttemptInProgress = true;
             _reconnectAttemptCandidate = candidate;
+            SetConnectionOperation(ConnectionOperation.AutoReconnect);
 
             try
             {
@@ -216,7 +253,7 @@ public partial class MainWindow
                 BluetoothIdTextBlock.Text = candidate.AddressText;
                 EnsureBatteryHistory(candidate.BluetoothAddress);
 
-                var info = await _ringService.ConnectAsync(candidate);
+                var info = await _ringService.ConnectAsync(candidate, cancellationToken);
 
                 if (_closing)
                 {
@@ -230,9 +267,13 @@ public partial class MainWindow
                 SetStatus("Ring reconnected. Realtime heart-rate acquisition started.");
                 return;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
             catch (Exception ex)
             {
-                if (_closing || cancellationToken.IsCancellationRequested)
+                if (_closing)
                 {
                     return;
                 }
@@ -250,9 +291,36 @@ public partial class MainWindow
             finally
             {
                 _reconnectAttemptCandidate = null;
-                _reconnectAttemptInProgress = false;
+                SetConnectionOperation(ConnectionOperation.None);
             }
         }
+    }
+
+    private async Task StopReconnectLoopAsync()
+    {
+        var cts = _reconnectLoopCts;
+        var task = _reconnectLoopTask;
+        _reconnectLoopCts = null;
+        _reconnectLoopTask = null;
+
+        if (cts is null)
+        {
+            return;
+        }
+
+        cts.Cancel();
+        if (task is not null)
+        {
+            try
+            {
+                await task;
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        }
+
+        cts.Dispose();
     }
 
     private void EnsureBatteryHistory(ulong bluetoothAddress)
@@ -276,21 +344,10 @@ public partial class MainWindow
             AutoReconnectEnabled));
     }
 
-    private void CancelReconnectLoop()
+    private async Task ShutdownReconnectAsync()
     {
-        if (_reconnectLoopCts is null)
-        {
-            return;
-        }
-
-        _reconnectLoopCts.Cancel();
-    }
-
-    private void MainWindow_AutoReconnectClosing(object? sender, System.ComponentModel.CancelEventArgs e)
-    {
-        CancelReconnectLoop();
+        await StopReconnectLoopAsync();
         SaveReconnectSettings();
-        UninstallNonBlockingTelemetryUi();
         _ringService.ConnectionChanged -= RingService_AutoReconnectConnectionChanged;
     }
 }
