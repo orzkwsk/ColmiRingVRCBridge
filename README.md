@@ -8,7 +8,7 @@ Initial hardware target: **COLMI R06**.
 
 The protocol reference used for the initial implementation documents **R02 / R06 / R10** as fully compatible. Other QRing-compatible models may work, but are not claimed as supported until tested.
 
-The R06 path has been exercised on real hardware. Current development is focused on improving telemetry liveness and recovery behavior around transient GATT failures and measurement-session stalls.
+The R06 path has been exercised on real hardware. Current development is focused on telemetry validity, reconnect reliability and recovery behavior around measurement-session stalls.
 
 ## Current PoC features
 
@@ -17,7 +17,7 @@ The UI is intentionally arranged in operation order:
 1. Scan nearby BLE rings, select one, connect.
 2. Check ring telemetry and device identification.
 3. Configure VRChat OSC parameter, type, scaling, target and output interval.
-4. Optionally replace the measured BPM with fixed dummy data for avatar/gimmick testing.
+4. Optionally replace measured BPM with fixed dummy data for avatar/gimmick testing.
 5. Start/stop OSC output.
 
 Implemented telemetry and diagnostics:
@@ -26,15 +26,20 @@ Implemented telemetry and diagnostics:
 - Heart-rate minimum / maximum since reset
 - Last 60 seconds heart-rate graph
 - Heart-rate min/max/history reset
+- Explicit HR `NoSample / Fresh / Stale` validity state
 - Battery percentage
 - Charging state
 - Persistent per-ring 24 hour battery history shown from the battery-value tooltip
 - Charging intervals highlighted in battery history
 - Bluetooth address
 - Optional GATT model / serial / hardware revision / firmware revision
-- BLE/HR liveness diagnostics available from the connection-status tooltip
-  - last valid BLE notification age
+- Connection-status diagnostics:
+  - link/telemetry state
+  - last raw GATT notification age
+  - last valid protocol packet age
   - last valid HR age
+  - raw / valid / invalid packet counters
+  - valid HR packet count
   - HR poll TX count
   - HR poll write failure count
   - consecutive HR poll failures
@@ -45,7 +50,9 @@ Connection behavior:
 - Last successful ring address is persisted locally
 - Automatic reconnect can be enabled/disabled from the connection row
 - Automatic reconnect defaults to enabled
-- The current reconnect loop targets the last successful Bluetooth address directly rather than requiring a fresh scan
+- Reconnect targets the last successful Bluetooth address directly rather than requiring a fresh scan
+- Manual connect/disconnect and auto reconnect use explicit internal operation state rather than UI-control state
+- Reconnect enable/disable transitions cancel and await the old reconnect loop before re-enabling
 
 Implemented OSC output:
 
@@ -54,24 +61,60 @@ Implemented OSC output:
 - Float or Int OSC value
 - Float default scaling: `BPM / 255.0` => `0.0 .. 1.0`
 - Raw BPM mode
-- Integer output is always raw BPM; normalized integer output is intentionally not supported
+- Integer output is raw BPM only
+- Invalid `Int + Normalize255` configuration is rejected
 - Default output interval: 3 seconds
 - Fixed dummy BPM mode
+- Only a fresh HR snapshot is exposed to the OSC output loop
 
-## Build
+When HR becomes stale, the current implementation stops producing new BPM values. VRChat may still retain the last parameter value already received. Whether to additionally send zero and/or a validity parameter is intentionally left as a product/API decision.
+
+## Internal architecture
+
+The PoC remains a Windows / R06 / VRChat bridge rather than a generic COLMI SDK.
+
+Current layering:
+
+```text
+Windows BLE scan / device open / GATT discovery
+    ColmiRingBleService
+        ↓
+Windows GATT packet transport
+    GattColmiTransport : IColmiTransport
+        ↓
+R06 protocol + measurement session
+    R06Protocol
+    R06Session
+        ↓
+Heart-rate snapshot / telemetry diagnostics
+        ↓
+WPF UI + VRChat OSC
+```
+
+`IColmiTransport` exists primarily as a hardware-independent test seam and as the boundary needed for later HR-session recovery work.
+
+## Build and test
 
 Requirements:
 
 - Windows 10/11
 - .NET 8 SDK
-- Visual Studio 2022 or `dotnet build`
-- Bluetooth Low Energy adapter
+- Visual Studio 2022 or `dotnet`
+- Bluetooth Low Energy adapter for the application
+
+Build:
 
 ```powershell
-dotnet build .\ColmiRingVRCBridge.sln
+dotnet build .\ColmiRingVRCBridge.sln -c Release
 ```
 
-No external NuGet package is required by the initial PoC. BLE uses the Windows Bluetooth APIs and OSC is encoded directly over UDP.
+Tests:
+
+```powershell
+dotnet test .\ColmiRingVRCBridge.sln -c Release
+```
+
+The application itself has no external runtime NuGet dependency. The test project uses xUnit / Microsoft.NET.Test.Sdk.
 
 ## Protocol notes
 
@@ -82,10 +125,11 @@ Known QRing/COLMI UART GATT service:
 - TX/notify: `6E400003-B5A3-F393-E0A9-E50E24DCCA9E`
 - Packet size: 16 bytes
 - Battery command: `0x03`
+- Realtime HR poll command: `0x1E`
 - Realtime measurement start: `0x69`
 - Realtime measurement stop: `0x6A`
 
-The currently validated R06 PoC uses the dedicated realtime HR type selected from hardware testing plus periodic realtime-HR polling. This is intentionally still treated as an R06-specific working dialect rather than a generalized protocol abstraction.
+The currently validated R06 PoC uses the dedicated realtime HR type selected from hardware testing plus periodic realtime-HR polling. It remains an R06-specific working dialect rather than a generalized multi-device profile system.
 
 Reference implementations / protocol research:
 
@@ -93,6 +137,35 @@ Reference implementations / protocol research:
 - https://github.com/robinojw/openring
 
 The bridge reimplements the required protocol surface in C# rather than embedding either project.
+
+## Reliability hardening status
+
+Implemented:
+
+- Transient HR poll-write failures no longer terminate the polling task permanently.
+- HR value + timestamp are stored as one atomic immutable snapshot.
+- HR freshness is independent from Bluetooth connection state.
+- BLE callback / UI-thread coupling uses non-blocking dispatch only.
+- Battery history persistence is queued off the BLE notification callback path.
+- Raw notification / valid packet / valid HR are separate diagnostics stages.
+- Internal telemetry states distinguish `Disconnected / Initializing / Streaming / Stale`.
+- Reconnect coordinator no longer uses `ConnectButton.IsEnabled` as internal state.
+- Reconnect OFF -> ON lifecycle waits for the previous loop to stop before starting a new loop.
+- R06 protocol/session logic is testable through a fake transport.
+
+Still pending R06 hardware validation:
+
+- Automatic HR measurement-session re-arm after stale telemetry.
+- Exact production stale threshold; current threshold is a provisional isolated value.
+- Escalation from HR re-arm to CCCD/GATT reinitialization to BLE device reopen.
+- Reconnect exponential backoff policy.
+- BLE/GATT hard-timeout behavior on target Windows versions.
+
+Still pending product/API decision:
+
+- VRChat OSC stale-source contract (`stop sending`, `send 0`, validity parameter, or combination).
+
+See `docs/adversarial-review-action-list.md` for the promotion gate and R06 validation procedure.
 
 ## Branch policy
 
@@ -102,34 +175,6 @@ The bridge reimplements the required protocol surface in C# rather than embeddin
 
 Current PoC baseline: `feature/initial-wpf-poc`.
 
-Current liveness/recovery hardening work: `feature/telemetry-liveness-hardening`.
+Current technical-debt / reliability branch: `feature/telemetry-liveness-hardening`.
 
-## Current hardening status
-
-Implemented without changing the empirically selected R06 measurement sequence:
-
-- A single transient HR poll-write failure no longer terminates the HR polling task permanently.
-- HR polling failures are counted and exposed for diagnostics.
-- Valid BLE-notification time and valid-HR time are tracked independently from Bluetooth connection state.
-- BLE event callbacks no longer synchronously block on WPF UI dispatch after the window is rendered.
-- HR graph redraw remains timer-driven rather than notification-driven.
-
-Still intentionally pending hardware validation or product-policy decisions:
-
-- Automatic HR measurement-session re-arm after telemetry becomes stale.
-- Exact stale-HR threshold.
-- Escalation from HR re-arm to GATT reinitialization to BLE device reopen.
-- BLE/GATT operation timeout strategy.
-- Reconnect backoff policy beyond the current ~1 second retry behavior.
-- VRChat OSC behavior when the HR source becomes stale (`0`, validity parameter, or preserve-last-value policy).
-- Generalized protocol-profile abstraction for additional ring models / firmware dialects.
-
-See `docs/adversarial-review-action-list.md` for the current review-derived action list and promotion gate.
-
-## PoC limitations
-
-- R06 has been tested, but long-duration and recovery-path behavior is still under active validation.
-- Tray-only operation is not implemented.
-- Device scan intentionally filters likely COLMI/QRing devices to keep the selector usable.
-- Automatic reconnect exists, but retry/backoff policy is still PoC-level.
-- Heart-rate liveness is now observable, but automatic stale-session recovery is not enabled until the R06 recovery sequence is validated on hardware.
+Do not promote this branch to `dev` until the documented promotion gate is satisfied.
