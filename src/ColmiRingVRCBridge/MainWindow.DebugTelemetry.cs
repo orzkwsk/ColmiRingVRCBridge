@@ -1,4 +1,5 @@
 #if DEBUG
+using ColmiRingVRCBridge.Models;
 using ColmiRingVRCBridge.Services;
 
 namespace ColmiRingVRCBridge;
@@ -24,6 +25,10 @@ public partial class MainWindow
                 CreateDebugTelemetrySnapshot,
                 DebugTelemetryLogInterval);
             _debugTelemetryLogger.Start();
+
+            _ringService.ConnectionChanged += DebugTelemetry_ConnectionChanged;
+            _ringService.BatteryUpdated += DebugTelemetry_BatteryUpdated;
+            _ringService.ProtocolWarning += DebugTelemetry_ProtocolWarning;
             Closed += MainWindow_DebugTelemetryClosed;
         }
         catch (Exception ex)
@@ -84,6 +89,25 @@ public partial class MainWindow
         };
     }
 
+    private void DebugTelemetry_ConnectionChanged(bool connected)
+    {
+        LogDebugTelemetryEvent("connection_changed", new { connected });
+    }
+
+    private void DebugTelemetry_BatteryUpdated(BatteryState battery)
+    {
+        LogDebugTelemetryEvent("battery_updated", new
+        {
+            percent = battery.Percent,
+            charging = battery.Charging
+        });
+    }
+
+    private void DebugTelemetry_ProtocolWarning(string message)
+    {
+        LogDebugTelemetryEvent("protocol_warning", new { message });
+    }
+
     private void LogDebugTelemetryEvent(string type, object? data = null)
     {
         _debugTelemetryLogger?.LogEvent(type, data);
@@ -92,6 +116,9 @@ public partial class MainWindow
     private async void MainWindow_DebugTelemetryClosed(object? sender, EventArgs e)
     {
         Closed -= MainWindow_DebugTelemetryClosed;
+        _ringService.ConnectionChanged -= DebugTelemetry_ConnectionChanged;
+        _ringService.BatteryUpdated -= DebugTelemetry_BatteryUpdated;
+        _ringService.ProtocolWarning -= DebugTelemetry_ProtocolWarning;
         await ShutdownDebugTelemetryLoggingAsync();
     }
 
