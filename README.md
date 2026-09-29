@@ -53,6 +53,11 @@ Connection behavior:
 - Reconnect targets the last successful Bluetooth address directly rather than requiring a fresh scan
 - Manual connect/disconnect and auto reconnect use explicit internal operation state rather than UI-control state
 - Reconnect enable/disable transitions cancel and await the old reconnect loop before re-enabling
+- Reconnect retry delay is intentionally fixed at approximately 1 second while Auto reconnect is enabled
+
+The fixed one-second retry cadence is an operational requirement, not a temporary PoC value. This bridge is expected to keep the upstream ring connection alive whenever possible and continue supplying telemetry to the downstream consumer. Reducing retry activity through exponential backoff is therefore not a default design goal.
+
+The one-second value is the delay before the next retry attempt. A Windows BLE/GATT connection attempt itself may take additional time before failing, so the wall-clock interval between completed attempts can be longer than one second.
 
 Implemented OSC output:
 
@@ -151,6 +156,7 @@ Implemented:
 - Internal telemetry states distinguish `Disconnected / Initializing / Streaming / Stale`.
 - Reconnect coordinator no longer uses `ConnectButton.IsEnabled` as internal state.
 - Reconnect OFF -> ON lifecycle waits for the previous loop to stop before starting a new loop.
+- Reconnect uses a fixed approximately one-second retry delay by design while Auto reconnect is enabled.
 - R06 protocol/session logic is testable through a fake transport.
 
 Still pending R06 hardware validation:
@@ -158,7 +164,6 @@ Still pending R06 hardware validation:
 - Automatic HR measurement-session re-arm after stale telemetry.
 - Exact production stale threshold; current threshold is a provisional isolated value.
 - Escalation from HR re-arm to CCCD/GATT reinitialization to BLE device reopen.
-- Reconnect exponential backoff policy.
 - BLE/GATT hard-timeout behavior on target Windows versions.
 
 Still pending product/API decision:
