@@ -17,6 +17,7 @@ public partial class MainWindow : Window
     private static readonly TimeSpan HeartRateHistoryRetention = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan HeartRateGraphGapThreshold = TimeSpan.FromSeconds(3);
     internal static readonly TimeSpan HeartRateFreshnessThreshold = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan BatteryFreshnessThreshold = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan BatteryHistoryRetention = TimeSpan.FromHours(24);
     private static readonly TimeSpan BatteryGraphGapThreshold = TimeSpan.FromMinutes(30);
 
@@ -35,6 +36,7 @@ public partial class MainWindow : Window
     private TextBlock? _batteryHistorySummaryText;
 
     private HeartRateSnapshot _heartRateSnapshot = HeartRateSnapshot.Empty;
+    private BatterySnapshot _batterySnapshot = BatterySnapshot.Empty;
     private int? _minimumHeartRate;
     private int? _maximumHeartRate;
     private bool _dummyEnabled;
@@ -117,6 +119,7 @@ public partial class MainWindow : Window
             }
 
             ResetHeartRateStats();
+            Volatile.Write(ref _batterySnapshot, BatterySnapshot.Empty);
             EnsureBatteryHistory(selected.BluetoothAddress);
 
             SetStatus($"Connecting to {selected.Name}...");
@@ -176,6 +179,7 @@ public partial class MainWindow : Window
     private void RingService_BatteryUpdated(BatteryState battery)
     {
         var timestamp = DateTimeOffset.UtcNow;
+        Volatile.Write(ref _batterySnapshot, new BatterySnapshot(battery, timestamp));
         _batteryHistory?.Add(battery, timestamp);
 
         Dispatcher.BeginInvoke(new Action(() =>
@@ -199,6 +203,7 @@ public partial class MainWindow : Window
         if (!connected)
         {
             Volatile.Write(ref _heartRateSnapshot, HeartRateSnapshot.Empty);
+            Volatile.Write(ref _batterySnapshot, BatterySnapshot.Empty);
         }
 
         Dispatcher.BeginInvoke(new Action(() =>
@@ -216,6 +221,8 @@ public partial class MainWindow : Window
             {
                 HeartRateTextBlock.Text = "— BPM";
                 LastHeartRateTextBlock.Text = "—";
+                BatteryTextBlock.Text = "— %";
+                ChargingTextBlock.Text = "—";
             }
         }));
     }
@@ -450,6 +457,7 @@ public partial class MainWindow : Window
 
     private void ClearDeviceDetails()
     {
+        Volatile.Write(ref _batterySnapshot, BatterySnapshot.Empty);
         BluetoothIdTextBlock.Text = "—";
         SerialModelTextBlock.Text = "—";
         HwFwTextBlock.Text = "—";
