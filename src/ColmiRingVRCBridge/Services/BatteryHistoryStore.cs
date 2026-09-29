@@ -33,7 +33,7 @@ internal sealed class BatteryHistoryStore
 
     public void Add(BatteryState battery, DateTimeOffset timestamp)
     {
-        BatteryHistorySample[]? persistenceSnapshot = null;
+        BatteryHistorySample[] persistenceSnapshot;
 
         lock (_gate)
         {
