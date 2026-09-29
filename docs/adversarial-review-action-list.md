@@ -57,7 +57,17 @@ Implemented:
 - Rapid `ON -> OFF -> ON -> OFF -> ON` cannot leave the UI enabled while no reconnect loop can be created because of a stale task reference.
 - Connection-attempt cancellation is propagated into connect/session initialization where possible without making the established HR session depend on the reconnect token lifetime.
 
-Reconnect cadence remains the current approximately one-second fixed retry interval pending hardware/Windows BLE validation.
+### Reconnect retry cadence is intentionally fixed at 1 second
+
+This is now an operational requirement rather than a temporary PoC value.
+
+The bridge is expected to maintain a live connection to its upstream ring whenever possible and continue supplying telemetry to the downstream consumer. Therefore, after a failed reconnect attempt, the next retry uses a fixed approximately one-second delay.
+
+Do not replace this with exponential backoff as a general optimization. Any future retry-policy change must preserve the product invariant:
+
+> connection recovery takes priority over reducing retry activity while Auto reconnect is enabled.
+
+The actual wall-clock interval between attempts may exceed one second because a Windows BLE/GATT connection attempt itself can take time before failing. `ReconnectInterval` defines the delay before the next retry, not a one-second hard timeout for the connect operation.
 
 ### Link state and HR telemetry state are separate
 
@@ -168,21 +178,6 @@ Observed behavior to validate on R06:
 
 The recovery implementation should escalate only as far as required by measured R06 behavior.
 
-### Reconnect retry backoff
-
-Current requirement remains approximately one-second reconnect attempts.
-
-Before replacing it with exponential backoff, measure:
-
-- normal reconnect latency after temporary range loss
-- powered-off ring behavior
-- non-advertising ring behavior after application restart
-- Windows BLE stale-link behavior
-
-Candidate policy after validation:
-
-`1 s -> 1 s -> 1 s -> 2 s -> 4 s -> 8 s -> 10-15 s cap`
-
 ### BLE/GATT operation timeout policy
 
 Cancellation now propagates through project-owned async boundaries where possible, but WinRT operations are not wrapped in arbitrary `Task.WhenAny()` timeouts.
@@ -267,6 +262,7 @@ Do not promote until all of the following are true:
 - [x] Telemetry handler duplication/runtime swapping is removed.
 - [x] Reconnect logic no longer uses UI control state as coordinator state.
 - [x] Reconnect cancellation/re-enable race is fixed structurally.
+- [x] Reconnect retry delay is intentionally fixed at approximately 1 second by operational requirement.
 - [x] Raw notification / valid packet / valid HR are distinguishable.
 - [x] Battery persistence disk I/O is outside the BLE callback path.
 - [x] Invalid Int + Normalize255 configuration is rejected by the model.
