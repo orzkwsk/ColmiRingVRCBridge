@@ -27,6 +27,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     public event Action<BatteryState>? BatteryUpdated;
     public event Action<bool>? ConnectionChanged;
     public event Action<string>? ProtocolWarning;
+    public event Action<HeartRateProtocolProbePacket>? HeartRateProtocolProbePacketObserved;
 
     public bool IsConnected => _device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
 
@@ -214,6 +215,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         session.HeartRateUpdated += Session_HeartRateUpdated;
         session.BatteryUpdated += Session_BatteryUpdated;
         session.ProtocolWarning += Session_ProtocolWarning;
+        session.HeartRateProtocolProbePacketObserved += Session_HeartRateProtocolProbePacketObserved;
     }
 
     private void UnhookSession(R06Session session)
@@ -221,6 +223,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         session.HeartRateUpdated -= Session_HeartRateUpdated;
         session.BatteryUpdated -= Session_BatteryUpdated;
         session.ProtocolWarning -= Session_ProtocolWarning;
+        session.HeartRateProtocolProbePacketObserved -= Session_HeartRateProtocolProbePacketObserved;
     }
 
     private void Session_HeartRateUpdated(int bpm) => HeartRateUpdated?.Invoke(bpm);
@@ -228,6 +231,9 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     private void Session_BatteryUpdated(BatteryState battery) => BatteryUpdated?.Invoke(battery);
 
     private void Session_ProtocolWarning(string message) => ProtocolWarning?.Invoke(message);
+
+    private void Session_HeartRateProtocolProbePacketObserved(HeartRateProtocolProbePacket packet) =>
+        HeartRateProtocolProbePacketObserved?.Invoke(packet);
 
     private void Device_ConnectionStatusChanged(BluetoothLEDevice sender, object args)
     {
