@@ -54,14 +54,14 @@ internal static class R06Protocol
                 parsed = new R06Packet(
                     R06PacketKind.Battery,
                     null,
-                    new BatteryState(Math.Clamp(packet[1], 0, 100), packet[2] != 0),
+                    new BatteryState(Math.Clamp((int)packet[1], 0, 100), packet[2] != 0),
                     null);
                 return true;
 
             case ColmiPacket.CommandRealtimeHeartRate:
                 parsed = new R06Packet(
                     R06PacketKind.HeartRate,
-                    packet[1] > 0 ? packet[1] : null,
+                    packet[1] > 0 ? (int)packet[1] : null,
                     null,
                     null);
                 return true;
@@ -73,10 +73,10 @@ internal static class R06Protocol
                     return true;
                 }
 
-                var errorCode = packet[2] == 0 ? null : packet[2];
+                byte? errorCode = packet[2] == 0 ? null : packet[2];
                 parsed = new R06Packet(
                     R06PacketKind.RealtimeStatus,
-                    errorCode is null && packet[3] > 0 ? packet[3] : null,
+                    errorCode is null && packet[3] > 0 ? (int)packet[3] : null,
                     null,
                     errorCode);
                 return true;
