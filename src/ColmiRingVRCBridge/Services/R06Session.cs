@@ -181,7 +181,7 @@ internal sealed class R06Session : IAsyncDisposable
             EmitHeartRateProtocolProbe(
                 now,
                 data,
-                data.Length > 1 ? data[1] : null,
+                data.Length > 1 ? (int?)data[1] : null,
                 "alternate_0x9e_response");
         }
 
