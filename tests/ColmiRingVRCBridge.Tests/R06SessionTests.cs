@@ -88,6 +88,44 @@ public sealed class R06SessionTests
     }
 
     [Fact]
+    public async Task ProtocolProbe_CapturesLowCandidateAndAlternate0x9eResponse()
+    {
+        await using var transport = new FakeTransport();
+        await using var session = new R06Session(
+            transport,
+            heartRatePollInterval: TimeSpan.FromHours(1),
+            batteryPollInterval: TimeSpan.FromHours(1),
+            handshakeDelay: TimeSpan.Zero);
+
+        var probes = new List<HeartRateProtocolProbePacket>();
+        var forwardedHeartRates = new List<int>();
+        session.HeartRateProtocolProbePacketObserved += probes.Add;
+        session.HeartRateUpdated += forwardedHeartRates.Add;
+
+        await session.StartAsync();
+
+        var lowPacket = ColmiPacket.Build(ColmiPacket.CommandRealtimeHeartRate, 3);
+        var alternatePacket = ColmiPacket.Build(0x9E, 72);
+        transport.Inject(lowPacket);
+        transport.Inject(alternatePacket);
+
+        Assert.Equal(2, probes.Count);
+
+        Assert.Equal(3, probes[0].CandidateBpm);
+        Assert.Equal(ColmiPacket.CommandRealtimeHeartRate, probes[0].Command);
+        Assert.Equal("candidate_outside_observed_30_220_range", probes[0].Reason);
+        Assert.Equal(Convert.ToHexString(lowPacket), probes[0].RawHex);
+
+        Assert.Equal(72, probes[1].CandidateBpm);
+        Assert.Equal(0x9E, probes[1].Command);
+        Assert.Equal("alternate_0x9e_response", probes[1].Reason);
+        Assert.Equal(Convert.ToHexString(alternatePacket), probes[1].RawHex);
+
+        // The probe is observational for now; it must not change the current live-HR behavior.
+        Assert.Contains(3, forwardedHeartRates);
+    }
+
+    [Fact]
     public async Task TelemetryState_TransitionsFromInitializingToStreamingToStale()
     {
         await using var transport = new FakeTransport();
