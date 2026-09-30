@@ -29,6 +29,7 @@ public partial class MainWindow
             _ringService.ConnectionChanged += DebugTelemetry_ConnectionChanged;
             _ringService.BatteryUpdated += DebugTelemetry_BatteryUpdated;
             _ringService.ProtocolWarning += DebugTelemetry_ProtocolWarning;
+            _ringService.HeartRateProtocolProbePacketObserved += DebugTelemetry_HeartRateProtocolProbePacketObserved;
             Closed += MainWindow_DebugTelemetryClosed;
         }
         catch (Exception ex)
@@ -108,6 +109,33 @@ public partial class MainWindow
         LogDebugTelemetryEvent("protocol_warning", new { message });
     }
 
+    private void DebugTelemetry_HeartRateProtocolProbePacketObserved(HeartRateProtocolProbePacket packet)
+    {
+        var diagnostics = _ringService.GetTelemetryDiagnostics();
+        LogDebugTelemetryEvent("hr_protocol_probe", new
+        {
+            packet.TimestampUtc,
+            command = $"0x{packet.Command:X2}",
+            packet.CandidateBpm,
+            packet.Reason,
+            packet.RawHex,
+            linkConnected = _ringService.IsConnected,
+            diagnostics = new
+            {
+                diagnostics.LastRawNotificationAt,
+                diagnostics.LastValidPacketAt,
+                diagnostics.LastValidHeartRateAt,
+                diagnostics.RawNotificationCount,
+                diagnostics.ValidPacketCount,
+                diagnostics.HeartRatePacketCount,
+                diagnostics.HeartRatePollTxCount,
+                diagnostics.HeartRatePollWriteFailureCount,
+                diagnostics.ConsecutiveHeartRatePollFailures,
+                diagnostics.HeartRateSessionStarted
+            }
+        });
+    }
+
     private void LogDebugTelemetryEvent(string type, object? data = null)
     {
         _debugTelemetryLogger?.LogEvent(type, data);
@@ -119,6 +147,7 @@ public partial class MainWindow
         _ringService.ConnectionChanged -= DebugTelemetry_ConnectionChanged;
         _ringService.BatteryUpdated -= DebugTelemetry_BatteryUpdated;
         _ringService.ProtocolWarning -= DebugTelemetry_ProtocolWarning;
+        _ringService.HeartRateProtocolProbePacketObserved -= DebugTelemetry_HeartRateProtocolProbePacketObserved;
         await ShutdownDebugTelemetryLoggingAsync();
     }
 
