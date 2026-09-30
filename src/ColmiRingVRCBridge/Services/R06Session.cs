@@ -4,6 +4,10 @@ namespace ColmiRingVRCBridge.Services;
 
 internal sealed class R06Session : IAsyncDisposable
 {
+    private const int ObservedLiveHeartRateMinimum = 30;
+    private const int ObservedLiveHeartRateMaximum = 220;
+    private const byte AlternateRealtimeHeartRateResponseCommand = 0x9E;
+
     private readonly IColmiTransport _transport;
     private readonly TimeSpan _heartRatePollInterval;
     private readonly TimeSpan _batteryPollInterval;
@@ -48,6 +52,7 @@ internal sealed class R06Session : IAsyncDisposable
     public event Action<int>? HeartRateUpdated;
     public event Action<BatteryState>? BatteryUpdated;
     public event Action<string>? ProtocolWarning;
+    public event Action<HeartRateProtocolProbePacket>? HeartRateProtocolProbePacketObserved;
 
     public bool IsHeartRateSessionStarted => Volatile.Read(ref _heartRateSessionStarted) != 0;
 
@@ -151,7 +156,8 @@ internal sealed class R06Session : IAsyncDisposable
 
     private void Transport_PacketReceived(byte[] data)
     {
-        var nowUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var now = DateTimeOffset.UtcNow;
+        var nowUnixMs = now.ToUnixTimeMilliseconds();
         Interlocked.Exchange(ref _lastRawNotificationUnixMs, nowUnixMs);
         Interlocked.Increment(ref _rawNotificationCount);
 
@@ -166,6 +172,18 @@ internal sealed class R06Session : IAsyncDisposable
 
         Interlocked.Exchange(ref _lastValidPacketUnixMs, nowUnixMs);
         Interlocked.Increment(ref _validPacketCount);
+
+        // Some current QRing-family implementations observe 0x9E (0x1E | 0x80)
+        // as the realtime-HR poll response. The R06 bridge does not parse that dialect yet,
+        // so capture it verbatim for validation without changing production behavior.
+        if (data[0] == AlternateRealtimeHeartRateResponseCommand)
+        {
+            EmitHeartRateProtocolProbe(
+                now,
+                data,
+                data.Length > 1 ? data[1] : null,
+                "alternate_0x9e_response");
+        }
 
         if (!R06Protocol.TryParse(data, out var packet))
         {
@@ -187,10 +205,42 @@ internal sealed class R06Session : IAsyncDisposable
 
         if (packet.HeartRate is { } bpm && bpm > 0)
         {
+            if (bpm is < ObservedLiveHeartRateMinimum or > ObservedLiveHeartRateMaximum)
+            {
+                EmitHeartRateProtocolProbe(
+                    now,
+                    data,
+                    bpm,
+                    "candidate_outside_observed_30_220_range");
+            }
+
+            // Keep forwarding the candidate unchanged for this capture run. The probe is
+            // intentionally observational so we can identify the R06 packet dialect before
+            // deciding whether low values are status codes, warm-up values, or true BPM data.
             Interlocked.Exchange(ref _lastValidHeartRateUnixMs, nowUnixMs);
             Interlocked.Increment(ref _heartRatePacketCount);
             HeartRateUpdated?.Invoke(bpm);
         }
+    }
+
+    private void EmitHeartRateProtocolProbe(
+        DateTimeOffset timestamp,
+        byte[] data,
+        int? candidateBpm,
+        string reason)
+    {
+        var handler = HeartRateProtocolProbePacketObserved;
+        if (handler is null)
+        {
+            return;
+        }
+
+        handler(new HeartRateProtocolProbePacket(
+            timestamp,
+            data.Length > 0 ? data[0] : (byte)0,
+            candidateBpm,
+            reason,
+            Convert.ToHexString(data)));
     }
 
     private async Task HeartRatePollingLoopAsync(CancellationToken cancellationToken)
