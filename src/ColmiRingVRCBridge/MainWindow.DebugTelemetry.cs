@@ -1,4 +1,7 @@
 #if DEBUG
+using System.Diagnostics;
+using System.Reflection;
+using System.Security.Cryptography;
 using ColmiRingVRCBridge.Models;
 using ColmiRingVRCBridge.Services;
 
@@ -25,6 +28,7 @@ public partial class MainWindow
                 CreateDebugTelemetrySnapshot,
                 DebugTelemetryLogInterval);
             _debugTelemetryLogger.Start();
+            LogDebugTelemetryEvent("app_start", CreateDebugBuildIdentity());
 
             _ringService.ConnectionChanged += DebugTelemetry_ConnectionChanged;
             _ringService.BatteryUpdated += DebugTelemetry_BatteryUpdated;
@@ -37,6 +41,55 @@ public partial class MainWindow
             System.Diagnostics.Debug.WriteLine($"Failed to initialize debug telemetry logging: {ex}");
             _debugTelemetryLogger = null;
         }
+    }
+
+    private static object CreateDebugBuildIdentity()
+    {
+        var assembly = typeof(MainWindow).Assembly;
+        var assemblyName = assembly.GetName();
+        var informationalVersion = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion;
+        var configuration = assembly
+            .GetCustomAttribute<AssemblyConfigurationAttribute>()?
+            .Configuration;
+
+        var executablePath = Environment.ProcessPath;
+        string? executableFileVersion = null;
+        DateTimeOffset? executableLastWriteUtc = null;
+        string? executableSha256 = null;
+
+        if (!string.IsNullOrWhiteSpace(executablePath) && File.Exists(executablePath))
+        {
+            try
+            {
+                executableFileVersion = FileVersionInfo.GetVersionInfo(executablePath).FileVersion;
+                executableLastWriteUtc = new DateTimeOffset(File.GetLastWriteTimeUtc(executablePath), TimeSpan.Zero);
+
+                using var stream = File.OpenRead(executablePath);
+                executableSha256 = Convert.ToHexString(SHA256.HashData(stream));
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to collect debug build identity: {ex}");
+            }
+        }
+
+        return new
+        {
+            appVersion = assemblyName.Version?.ToString(),
+            informationalVersion,
+            configuration,
+            executableFileVersion,
+            executableLastWriteUtc,
+            executableSha256,
+            capabilities = new[]
+            {
+                "hr_protocol_probe_v1",
+                "battery_freshness_v1",
+                "telemetry_liveness_v1"
+            }
+        };
     }
 
     private object CreateDebugTelemetrySnapshot()
