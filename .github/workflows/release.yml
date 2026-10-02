@@ -47,6 +47,9 @@ jobs:
       - name: Test Release
         run: dotnet test .\ColmiRingVRCBridge.sln -c Release --no-build --no-restore -p:Version=${{ inputs.version }}
 
+      - name: Restore win-x64 publish runtime
+        run: dotnet restore .\src\ColmiRingVRCBridge\ColmiRingVRCBridge.csproj -r win-x64
+
       - name: Publish self-contained win-x64
         shell: pwsh
         run: |
