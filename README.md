@@ -1,84 +1,160 @@
 # ColmiRingVRCBridge
 
-Windows WPF bridge that reads realtime heart-rate telemetry from QRing-compatible COLMI smart rings over BLE and sends it directly to VRChat OSC.
+Windows WPF bridge for reading realtime heart-rate telemetry from QRing-compatible COLMI smart rings over Bluetooth Low Energy and forwarding it to VRChat OSC.
 
-## Target
+> **Status:** `v0.1.0-preview.1` is the first public preview. The currently validated hardware target is **COLMI R06**. This software is experimental and is not intended for medical diagnosis, treatment, or safety-critical monitoring.
 
-Initial hardware target: **COLMI R06**.
+## What it does
 
-The protocol reference used for the initial implementation documents **R02 / R06 / R10** as fully compatible. Other QRing-compatible models may work, but are not claimed as supported until tested.
+```text
+COLMI / QRing-compatible ring
+        ↓ BLE
+ColmiRingVRCBridge
+        ↓ OSC / UDP
+VRChat avatar parameters
+```
 
-The R06 path has been exercised on real hardware. Current development is focused on telemetry validity, reconnect reliability and recovery behavior around measurement-session stalls.
+Current features:
 
-## Current PoC features
+- Scan and connect to nearby compatible BLE rings.
+- Realtime heart-rate acquisition from COLMI R06.
+- Battery percentage and charging state.
+- Heart-rate min/max and a rolling 60-second graph.
+- Per-ring 24-hour battery history stored locally.
+- Automatic reconnect to the last successful Bluetooth address.
+- Connection and telemetry diagnostics for BLE/GATT/protocol troubleshooting.
+- VRChat OSC output as `Float` or `Int`.
+- Optional fixed dummy BPM for avatar/gimmick testing.
 
-The UI is intentionally arranged in operation order:
+## Supported hardware
 
-1. Scan nearby BLE rings, select one, connect.
-2. Check ring telemetry and device identification.
-3. Configure VRChat OSC parameter, type, scaling, target and output interval.
-4. Optionally replace measured BPM with fixed dummy data for avatar/gimmick testing.
-5. Start/stop OSC output.
+### Validated
 
-Implemented telemetry and diagnostics:
+- **COLMI R06**
 
-- Realtime BPM
-- Heart-rate minimum / maximum since reset
-- Last 60 seconds heart-rate graph
-- Heart-rate min/max/history reset
-- Explicit HR `NoSample / Fresh / Stale` validity state
-- Battery percentage
-- Charging state
-- Persistent per-ring 24 hour battery history shown from the battery-value tooltip
-- Charging intervals highlighted in battery history
-- Bluetooth address
-- Optional GATT model / serial / hardware revision / firmware revision
-- Connection-status diagnostics:
-  - link/telemetry state
-  - last raw GATT notification age
-  - last valid protocol packet age
-  - last valid HR age
-  - raw / valid / invalid packet counters
-  - valid HR packet count
-  - HR poll TX count
-  - HR poll write failure count
-  - consecutive HR poll failures
+### Protocol-compatible references, not yet claimed as validated
 
-Connection behavior:
+The protocol material used during development documents R02 / R06 / R10 as sharing the relevant protocol surface. Until each device is tested with this bridge, only R06 is treated as supported hardware.
 
-- Manual scan and connect
-- Last successful ring address is persisted locally
-- Automatic reconnect can be enabled/disabled from the connection row
-- Automatic reconnect defaults to enabled
-- Reconnect targets the last successful Bluetooth address directly rather than requiring a fresh scan
-- Manual connect/disconnect and auto reconnect use explicit internal operation state rather than UI-control state
-- Reconnect enable/disable transitions cancel and await the old reconnect loop before re-enabling
-- Reconnect retry delay is intentionally fixed at approximately 1 second while Auto reconnect is enabled
+Other QRing-compatible COLMI models may work but are currently unsupported/experimental.
 
-The fixed one-second retry cadence is an operational requirement, not a temporary PoC value. This bridge is expected to keep the upstream ring connection alive whenever possible and continue supplying telemetry to the downstream consumer. Reducing retry activity through exponential backoff is therefore not a default design goal.
+## Requirements
 
-The one-second value is the delay before the next retry attempt. A Windows BLE/GATT connection attempt itself may take additional time before failing, so the wall-clock interval between completed attempts can be longer than one second.
+For the prebuilt release:
 
-Implemented OSC output:
+- Windows 10/11 x64
+- Bluetooth Low Energy adapter
+- VRChat OSC enabled when using OSC output
 
-- Default endpoint: `127.0.0.1:9000`
-- Parameter name is expanded to `/avatar/parameters/<name>`
-- Float or Int OSC value
-- Float default scaling: `BPM / 255.0` => `0.0 .. 1.0`
-- Raw BPM mode
-- Integer output is raw BPM only
-- Invalid `Int + Normalize255` configuration is rejected
-- Default output interval: 3 seconds
-- Fixed dummy BPM mode
-- Only a fresh HR snapshot is exposed to the OSC output loop
+The `win-x64` GitHub Release package is self-contained and does not require a separately installed .NET runtime.
 
-When HR becomes stale, the current implementation stops producing new BPM values. VRChat may still retain the last parameter value already received. Whether to additionally send zero and/or a validity parameter is intentionally left as a product/API decision.
+For source builds:
+
+- .NET 8 SDK
+- Visual Studio 2022 or `dotnet`
+
+## Installation
+
+1. Download the latest `ColmiRingVRCBridge-<version>-win-x64.zip` from GitHub Releases.
+2. Extract it to a writable directory.
+3. Start `ColmiRingVRCBridge.exe`.
+4. Scan for the ring, select it, and connect.
+5. Configure the VRChat OSC parameter and start OSC output.
+
+No installer or background Windows service is installed.
+
+## VRChat OSC behavior
+
+Default endpoint:
+
+- Host: `127.0.0.1`
+- Port: `9000`
+
+Parameter names are expanded to:
+
+```text
+/avatar/parameters/<name>
+```
+
+Supported output modes:
+
+- `Float`, normalized as `BPM / 255.0`
+- `Float`, raw BPM
+- `Int`, raw BPM
+
+`Int + Normalize255` is rejected as an invalid configuration.
+
+Default output interval is 3 seconds.
+
+### Stale heart-rate behavior in v0.1.x preview
+
+Heart-rate freshness is tracked independently from the BLE connection. When the current HR sample becomes stale, the bridge **stops emitting new BPM values** until a fresh sample is available again.
+
+VRChat may therefore retain the last parameter value it previously received. The current preview does not send an automatic zero value and does not expose a separate validity OSC parameter.
+
+This behavior is part of the `0.1.x` preview contract and may be expanded in a later version.
+
+## Connection behavior
+
+- Last successful ring address is stored locally.
+- Automatic reconnect is enabled by default and can be disabled in the UI.
+- Reconnect targets the last successful Bluetooth address directly.
+- Retry delay is intentionally fixed at approximately one second while automatic reconnect is enabled.
+- The actual wall-clock interval can be longer because Windows BLE/GATT connection attempts may themselves take time to fail or complete.
+
+The fixed retry cadence is intentional: connection recovery takes priority over reducing retry activity while automatic reconnect is enabled.
+
+## Local data and privacy
+
+The application does not require a cloud service.
+
+Runtime state is stored under:
+
+```text
+%LocalAppData%\ColmiRingVRCBridge
+```
+
+Current persisted data includes:
+
+- last successful Bluetooth address / device name and auto-reconnect setting (`connection.json`)
+- per-ring battery history (`battery-<address>.csv`)
+
+`Debug` builds can additionally write diagnostic JSONL logs under `debug-logs`. Release builds compile that diagnostic logger out.
+
+OSC is sent over UDP to the host/port configured in the UI; the default is localhost (`127.0.0.1:9000`).
+
+## Known limitations of v0.1.0-preview.1
+
+- R06 is the only hardware target validated so far.
+- Automatic recovery from an HR measurement-session stall after remove/re-wear is not yet guaranteed.
+- The exact production stale threshold and recovery escalation policy remain under hardware validation.
+- BLE/GATT timeout behavior depends partly on Windows/WinRT behavior.
+- Stale HR currently stops new OSC BPM transmission rather than clearing the remote parameter.
+- Release packaging currently targets Windows x64 only.
+
+Detailed engineering status is tracked in `docs/adversarial-review-action-list.md`.
+
+## Build and test
+
+Build:
+
+```powershell
+dotnet build .\ColmiRingVRCBridge.sln -c Release
+```
+
+Tests:
+
+```powershell
+dotnet test .\ColmiRingVRCBridge.sln -c Release
+```
+
+The application project itself has no external runtime NuGet dependency. The test project uses xUnit and Microsoft.NET.Test.Sdk.
+
+CI performs Release build and unit tests on `windows-latest`.
 
 ## Internal architecture
 
-The PoC remains a Windows / R06 / VRChat bridge rather than a generic COLMI SDK.
-
-Current layering:
+The current scope is deliberately a Windows / R06 / VRChat bridge, not a generic COLMI SDK.
 
 ```text
 Windows BLE scan / device open / GATT discovery
@@ -96,30 +172,7 @@ Heart-rate snapshot / telemetry diagnostics
 WPF UI + VRChat OSC
 ```
 
-`IColmiTransport` exists primarily as a hardware-independent test seam and as the boundary needed for later HR-session recovery work.
-
-## Build and test
-
-Requirements:
-
-- Windows 10/11
-- .NET 8 SDK
-- Visual Studio 2022 or `dotnet`
-- Bluetooth Low Energy adapter for the application
-
-Build:
-
-```powershell
-dotnet build .\ColmiRingVRCBridge.sln -c Release
-```
-
-Tests:
-
-```powershell
-dotnet test .\ColmiRingVRCBridge.sln -c Release
-```
-
-The application itself has no external runtime NuGet dependency. The test project uses xUnit / Microsoft.NET.Test.Sdk.
+`IColmiTransport` provides a hardware-independent test seam for packet/session logic and future recovery work.
 
 ## Protocol notes
 
@@ -134,52 +187,22 @@ Known QRing/COLMI UART GATT service:
 - Realtime measurement start: `0x69`
 - Realtime measurement stop: `0x6A`
 
-The currently validated R06 PoC uses the dedicated realtime HR type selected from hardware testing plus periodic realtime-HR polling. It remains an R06-specific working dialect rather than a generalized multi-device profile system.
-
 Reference implementations / protocol research:
 
 - https://github.com/tahnok/colmi_r02_client
 - https://github.com/robinojw/openring
 
-The bridge reimplements the required protocol surface in C# rather than embedding either project.
-
-## Reliability hardening status
-
-Implemented:
-
-- Transient HR poll-write failures no longer terminate the polling task permanently.
-- HR value + timestamp are stored as one atomic immutable snapshot.
-- HR freshness is independent from Bluetooth connection state.
-- BLE callback / UI-thread coupling uses non-blocking dispatch only.
-- Battery history persistence is queued off the BLE notification callback path.
-- Raw notification / valid packet / valid HR are separate diagnostics stages.
-- Internal telemetry states distinguish `Disconnected / Initializing / Streaming / Stale`.
-- Reconnect coordinator no longer uses `ConnectButton.IsEnabled` as internal state.
-- Reconnect OFF -> ON lifecycle waits for the previous loop to stop before starting a new loop.
-- Reconnect uses a fixed approximately one-second retry delay by design while Auto reconnect is enabled.
-- R06 protocol/session logic is testable through a fake transport.
-
-Still pending R06 hardware validation:
-
-- Automatic HR measurement-session re-arm after stale telemetry.
-- Exact production stale threshold; current threshold is a provisional isolated value.
-- Escalation from HR re-arm to CCCD/GATT reinitialization to BLE device reopen.
-- BLE/GATT hard-timeout behavior on target Windows versions.
-
-Still pending product/API decision:
-
-- VRChat OSC stale-source contract (`stop sending`, `send 0`, validity parameter, or combination).
-
-See `docs/adversarial-review-action-list.md` for the promotion gate and R06 validation procedure.
+This project reimplements the protocol surface it uses in C# and does not embed either project.
 
 ## Branch policy
 
-- `main`: stable
+- `main`: published/release baseline
 - `dev`: integration
 - `feature/*`: active development
+- `release/*`: release preparation
 
-Current PoC baseline: `feature/initial-wpf-poc`.
+Development changes should normally flow `feature/* -> dev -> main`. Release-preparation branches may be used to freeze documentation, packaging, versioning, and release automation before promotion.
 
-Current technical-debt / reliability branch: `feature/telemetry-liveness-hardening`.
+## License
 
-Do not promote this branch to `dev` until the documented promotion gate is satisfied.
+MIT License. See `LICENSE`.
