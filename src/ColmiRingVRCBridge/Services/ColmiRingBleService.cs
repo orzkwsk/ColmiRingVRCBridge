@@ -18,6 +18,8 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     private static readonly Guid SerialNumberUuid = Guid.Parse("00002A25-0000-1000-8000-00805F9B34FB");
     private static readonly Guid FirmwareRevisionUuid = Guid.Parse("00002A26-0000-1000-8000-00805F9B34FB");
     private static readonly Guid HardwareRevisionUuid = Guid.Parse("00002A27-0000-1000-8000-00805F9B34FB");
+    private static readonly TimeSpan ConnectAttemptTimeout = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan DisconnectCleanupTimeout = TimeSpan.FromSeconds(3);
 
     private BluetoothLEDevice? _device;
     private GattDeviceService? _uartService;
@@ -27,6 +29,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     public event Action<BatteryState>? BatteryUpdated;
     public event Action<bool>? ConnectionChanged;
     public event Action<string>? ProtocolWarning;
+    public event Action<string>? ConnectionProgress;
     public event Action<HeartRateProtocolProbePacket>? HeartRateProtocolProbePacketObserved;
 
     public bool IsConnected => _device?.ConnectionStatus == BluetoothConnectionStatus.Connected;
@@ -101,7 +104,9 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
                 BluetoothLEDevice? resolvedDevice = null;
                 try
                 {
-                    resolvedDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(observedDevice.BluetoothAddress);
+                    resolvedDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(observedDevice.BluetoothAddress)
+                        .AsTask(cancellationToken)
+                        .ConfigureAwait(false);
                     if (resolvedDevice is not null && !string.IsNullOrWhiteSpace(resolvedDevice.Name))
                     {
                         name = resolvedDevice.Name;
@@ -138,20 +143,32 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         await DisconnectAsync().ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
 
-        _device = await BluetoothLEDevice.FromBluetoothAddressAsync(candidate.BluetoothAddress);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (_device is null)
-        {
-            throw new InvalidOperationException("Windows could not open the selected BLE device.");
-        }
-
-        _device.ConnectionStatusChanged += Device_ConnectionStatusChanged;
+        using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        attemptCts.CancelAfter(ConnectAttemptTimeout);
+        var attemptToken = attemptCts.Token;
 
         try
         {
-            var services = await _device.GetGattServicesForUuidAsync(UartServiceUuid, BluetoothCacheMode.Uncached);
-            cancellationToken.ThrowIfCancellationRequested();
+            ReportConnectionProgress("device_open_start");
+            _device = await BluetoothLEDevice.FromBluetoothAddressAsync(candidate.BluetoothAddress)
+                .AsTask(attemptToken)
+                .ConfigureAwait(false);
+            ReportConnectionProgress("device_open_complete");
+
+            if (_device is null)
+            {
+                throw new InvalidOperationException("Windows could not open the selected BLE device.");
+            }
+
+            _device.ConnectionStatusChanged += Device_ConnectionStatusChanged;
+
+            ReportConnectionProgress("uart_service_discovery_start");
+            var services = await _device
+                .GetGattServicesForUuidAsync(UartServiceUuid, BluetoothCacheMode.Uncached)
+                .AsTask(attemptToken)
+                .ConfigureAwait(false);
+            ReportConnectionProgress("uart_service_discovery_complete");
+
             if (services.Status != GattCommunicationStatus.Success || services.Services.Count == 0)
             {
                 throw new InvalidOperationException("COLMI UART GATT service was not found on the selected device.");
@@ -159,9 +176,16 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
 
             _uartService = services.Services[0];
 
-            var rxResult = await _uartService.GetCharacteristicsForUuidAsync(UartRxUuid, BluetoothCacheMode.Uncached);
-            var txResult = await _uartService.GetCharacteristicsForUuidAsync(UartTxUuid, BluetoothCacheMode.Uncached);
-            cancellationToken.ThrowIfCancellationRequested();
+            ReportConnectionProgress("characteristic_discovery_start");
+            var rxResult = await _uartService
+                .GetCharacteristicsForUuidAsync(UartRxUuid, BluetoothCacheMode.Uncached)
+                .AsTask(attemptToken)
+                .ConfigureAwait(false);
+            var txResult = await _uartService
+                .GetCharacteristicsForUuidAsync(UartTxUuid, BluetoothCacheMode.Uncached)
+                .AsTask(attemptToken)
+                .ConfigureAwait(false);
+            ReportConnectionProgress("characteristic_discovery_complete");
 
             if (rxResult.Status != GattCommunicationStatus.Success || rxResult.Characteristics.Count == 0 ||
                 txResult.Status != GattCommunicationStatus.Success || txResult.Characteristics.Count == 0)
@@ -174,11 +198,22 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             HookSession(session);
             _session = session;
 
-            var deviceInfo = await ReadDeviceInfoAsync().ConfigureAwait(false);
-            await session.StartAsync(cancellationToken).ConfigureAwait(false);
+            ReportConnectionProgress("device_info_read_start");
+            var deviceInfo = await ReadDeviceInfoAsync(attemptToken).ConfigureAwait(false);
+            ReportConnectionProgress("device_info_read_complete");
+
+            ReportConnectionProgress("protocol_session_start");
+            await session.StartAsync(attemptToken).ConfigureAwait(false);
+            ReportConnectionProgress("protocol_session_ready");
 
             ConnectionChanged?.Invoke(true);
             return deviceInfo;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            ReportConnectionProgress("connect_timeout");
+            await DisconnectAsync().ConfigureAwait(false);
+            throw new TimeoutException($"BLE/GATT connection attempt exceeded {ConnectAttemptTimeout.TotalSeconds:0} seconds.");
         }
         catch
         {
@@ -194,7 +229,22 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         if (session is not null)
         {
             UnhookSession(session);
-            await session.DisposeAsync().ConfigureAwait(false);
+            try
+            {
+                await session.DisposeAsync()
+                    .AsTask()
+                    .WaitAsync(DisconnectCleanupTimeout)
+                    .ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                ProtocolWarning?.Invoke(
+                    $"BLE session cleanup exceeded {DisconnectCleanupTimeout.TotalSeconds:0} seconds; forcing local handle disposal.");
+            }
+            catch (Exception ex)
+            {
+                ProtocolWarning?.Invoke($"BLE session cleanup failed: {ex.Message}");
+            }
         }
 
         if (_device is not null)
@@ -208,6 +258,17 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         _device = null;
 
         ConnectionChanged?.Invoke(false);
+    }
+
+    public Task RebootAsync(CancellationToken cancellationToken = default)
+    {
+        if (!IsConnected || _session is null)
+        {
+            throw new InvalidOperationException("Ring is not connected.");
+        }
+
+        ReportConnectionProgress("ring_reboot_command");
+        return _session.RebootAsync(cancellationToken);
     }
 
     private void HookSession(R06Session session)
@@ -243,36 +304,48 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         }
     }
 
-    private async Task<RingDeviceInfo> ReadDeviceInfoAsync()
+    private async Task<RingDeviceInfo> ReadDeviceInfoAsync(CancellationToken cancellationToken)
     {
         if (_device is null)
         {
             return new RingDeviceInfo(null, null, null, null);
         }
 
-        var result = await _device.GetGattServicesForUuidAsync(DeviceInfoServiceUuid, BluetoothCacheMode.Uncached);
+        var result = await _device
+            .GetGattServicesForUuidAsync(DeviceInfoServiceUuid, BluetoothCacheMode.Uncached)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
         if (result.Status != GattCommunicationStatus.Success || result.Services.Count == 0)
         {
             return new RingDeviceInfo(null, null, null, null);
         }
 
         using var service = result.Services[0];
-        var model = await ReadStringCharacteristicAsync(service, ModelNumberUuid).ConfigureAwait(false);
-        var serial = await ReadStringCharacteristicAsync(service, SerialNumberUuid).ConfigureAwait(false);
-        var hardware = await ReadStringCharacteristicAsync(service, HardwareRevisionUuid).ConfigureAwait(false);
-        var firmware = await ReadStringCharacteristicAsync(service, FirmwareRevisionUuid).ConfigureAwait(false);
+        var model = await ReadStringCharacteristicAsync(service, ModelNumberUuid, cancellationToken).ConfigureAwait(false);
+        var serial = await ReadStringCharacteristicAsync(service, SerialNumberUuid, cancellationToken).ConfigureAwait(false);
+        var hardware = await ReadStringCharacteristicAsync(service, HardwareRevisionUuid, cancellationToken).ConfigureAwait(false);
+        var firmware = await ReadStringCharacteristicAsync(service, FirmwareRevisionUuid, cancellationToken).ConfigureAwait(false);
         return new RingDeviceInfo(model, serial, hardware, firmware);
     }
 
-    private static async Task<string?> ReadStringCharacteristicAsync(GattDeviceService service, Guid characteristicUuid)
+    private static async Task<string?> ReadStringCharacteristicAsync(
+        GattDeviceService service,
+        Guid characteristicUuid,
+        CancellationToken cancellationToken)
     {
-        var result = await service.GetCharacteristicsForUuidAsync(characteristicUuid, BluetoothCacheMode.Uncached);
+        var result = await service
+            .GetCharacteristicsForUuidAsync(characteristicUuid, BluetoothCacheMode.Uncached)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
         if (result.Status != GattCommunicationStatus.Success || result.Characteristics.Count == 0)
         {
             return null;
         }
 
-        var read = await result.Characteristics[0].ReadValueAsync(BluetoothCacheMode.Uncached);
+        var read = await result.Characteristics[0]
+            .ReadValueAsync(BluetoothCacheMode.Uncached)
+            .AsTask(cancellationToken)
+            .ConfigureAwait(false);
         if (read.Status != GattCommunicationStatus.Success)
         {
             return null;
@@ -282,6 +355,11 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         var data = new byte[(int)reader.UnconsumedBufferLength];
         reader.ReadBytes(data);
         return System.Text.Encoding.UTF8.GetString(data).TrimEnd('\0').Trim();
+    }
+
+    private void ReportConnectionProgress(string stage)
+    {
+        ConnectionProgress?.Invoke(stage);
     }
 
     private static bool LooksLikeColmiRing(string name)
