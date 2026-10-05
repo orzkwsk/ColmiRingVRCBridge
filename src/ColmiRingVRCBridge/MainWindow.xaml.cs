@@ -67,18 +67,21 @@ public partial class MainWindow : Window
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
     {
-        ScanButton.IsEnabled = false;
-        RingComboBox.IsEnabled = false;
-        SetStatus("Scanning for COLMI / QRing-compatible BLE devices...");
+        var keepReconnectSuppressed = false;
+        SetConnectionOperation(ConnectionOperation.ManualScan);
 
         try
         {
+            await SuppressAutoReconnectAsync();
+            SetStatus("Scanning for COLMI / QRing-compatible BLE devices...");
+
             var devices = await _ringService.ScanAsync(TimeSpan.FromSeconds(6));
             RingComboBox.ItemsSource = devices;
             if (devices.Count > 0)
             {
                 RingComboBox.SelectedIndex = 0;
-                SetStatus($"Scan complete: {devices.Count} candidate(s) found.");
+                keepReconnectSuppressed = true;
+                SetStatus($"Scan complete: {devices.Count} candidate(s) found. Auto reconnect is paused while selecting a device.");
             }
             else
             {
@@ -91,7 +94,11 @@ public partial class MainWindow : Window
         }
         finally
         {
-            RefreshConnectionControls();
+            SetConnectionOperation(ConnectionOperation.None);
+            if (!keepReconnectSuppressed)
+            {
+                ResumeAutoReconnect();
+            }
         }
     }
 
@@ -104,11 +111,14 @@ public partial class MainWindow : Window
 
         try
         {
+            await SuppressAutoReconnectAsync();
+
             if (operation == ConnectionOperation.ManualDisconnect)
             {
                 SetStatus("Disconnecting ring...");
                 await _ringService.DisconnectAsync();
                 ClearDeviceDetails();
+                SetStatus("Ring disconnected. Auto reconnect is paused after a manual disconnect.");
                 return;
             }
 
@@ -139,10 +149,41 @@ public partial class MainWindow : Window
         finally
         {
             SetConnectionOperation(ConnectionOperation.None);
-            if (AutoReconnectEnabled && !_ringService.IsConnected && _lastReconnectCandidate is not null)
+
+            if (operation == ConnectionOperation.ManualConnect)
             {
-                EnsureReconnectLoop();
+                ResumeAutoReconnect();
             }
+        }
+    }
+
+    private async void RebootButton_Click(object sender, RoutedEventArgs e)
+    {
+        SetConnectionOperation(ConnectionOperation.ManualReboot);
+
+        try
+        {
+            await SuppressAutoReconnectAsync();
+
+            using var rebootCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            SetStatus("Sending experimental ring reboot command (0x08/0x01)...");
+            await _ringService.RebootAsync(rebootCts.Token);
+
+            // A successful reboot command is expected to drop the BLE link.
+            // Dispose local handles explicitly so the normal reconnect loop starts cleanly.
+            await Task.Delay(TimeSpan.FromMilliseconds(300));
+            await _ringService.DisconnectAsync();
+            ClearDeviceDetails();
+            SetStatus("Ring reboot command sent. Waiting for auto reconnect...");
+        }
+        catch (Exception ex)
+        {
+            SetStatus($"Ring reboot failed: {ex.Message}");
+        }
+        finally
+        {
+            SetConnectionOperation(ConnectionOperation.None);
+            ResumeAutoReconnect();
         }
     }
 
