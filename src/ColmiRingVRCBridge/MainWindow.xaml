@@ -33,6 +33,7 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="135"/>
@@ -64,7 +65,12 @@
                         <TextBlock x:Name="HwFwTextBlock" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2"
                                    Margin="0,6,0,0" Text="—" FontFamily="Consolas"/>
 
-                        <TextBlock Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" Foreground="Gray"
+                        <TextBlock Grid.Row="5" Grid.Column="0" Text="Recovery" Margin="0,10,0,0" VerticalAlignment="Center"/>
+                        <Button x:Name="RebootButton" Grid.Row="5" Grid.Column="2" Margin="0,8,0,0"
+                                Content="Reboot ring" Click="RebootButton_Click" MinWidth="105" IsEnabled="False"
+                                ToolTip="Experimental R02-family reboot command (0x08/0x01)."/>
+
+                        <TextBlock Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,8,0,0" Foreground="Gray"
                                    Text="Scan filters for QRing/COLMI-like names or the known UART GATT service."/>
                     </Grid>
                 </GroupBox>
