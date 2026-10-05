@@ -20,6 +20,7 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     private static readonly Guid HardwareRevisionUuid = Guid.Parse("00002A27-0000-1000-8000-00805F9B34FB");
     private static readonly TimeSpan ConnectAttemptTimeout = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan DisconnectCleanupTimeout = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan ScanResolveTimeout = TimeSpan.FromSeconds(2);
 
     private BluetoothLEDevice? _device;
     private GattDeviceService? _uartService;
@@ -104,13 +105,21 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
                 BluetoothLEDevice? resolvedDevice = null;
                 try
                 {
+                    using var resolveCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                    resolveCts.CancelAfter(ScanResolveTimeout);
+
                     resolvedDevice = await BluetoothLEDevice.FromBluetoothAddressAsync(observedDevice.BluetoothAddress)
-                        .AsTask(cancellationToken)
+                        .AsTask(resolveCts.Token)
                         .ConfigureAwait(false);
                     if (resolvedDevice is not null && !string.IsNullOrWhiteSpace(resolvedDevice.Name))
                     {
                         name = resolvedDevice.Name;
                     }
+                }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // Name resolution is best-effort. Do not let one Windows BLE
+                    // device-open stall hold the manual scan UI indefinitely.
                 }
                 catch
                 {
