@@ -305,7 +305,10 @@ public partial class MainWindow
             finally
             {
                 _reconnectAttemptCandidate = null;
-                SetConnectionOperation(ConnectionOperation.None);
+                if (_connectionOperation == ConnectionOperation.AutoReconnect)
+                {
+                    SetConnectionOperation(ConnectionOperation.None);
+                }
             }
         }
     }
