@@ -6,6 +6,23 @@ namespace ColmiRingVRCBridge.Tests;
 public sealed class R06SessionTests
 {
     [Fact]
+    public async Task RebootAsync_WritesRebootPacket()
+    {
+        await using var transport = new FakeTransport();
+        await using var session = new R06Session(
+            transport,
+            heartRatePollInterval: TimeSpan.FromHours(1),
+            batteryPollInterval: TimeSpan.FromHours(1),
+            handshakeDelay: TimeSpan.Zero);
+
+        await session.StartAsync();
+        await session.RebootAsync();
+
+        Assert.NotNull(transport.LastWrittenPacket);
+        Assert.Equal(R06Protocol.BuildRebootPacket(), transport.LastWrittenPacket);
+    }
+
+    [Fact]
     public async Task Polling_SurvivesTransientWriteFailureAndResetsConsecutiveCount()
     {
         await using var transport = new FakeTransport
@@ -185,6 +202,8 @@ public sealed class R06SessionTests
 
         public event Action<byte[]>? PacketReceived;
 
+        public byte[]? LastWrittenPacket { get; private set; }
+
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -194,6 +213,7 @@ public sealed class R06SessionTests
         public Task WriteAsync(byte[] packet, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            LastWrittenPacket = packet.ToArray();
 
             if (packet.Length > 0 &&
                 packet[0] == ColmiPacket.CommandRealtimeHeartRate &&
