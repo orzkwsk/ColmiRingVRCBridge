@@ -5,6 +5,18 @@ namespace ColmiRingVRCBridge.Tests;
 public sealed class R06ProtocolTests
 {
     [Fact]
+    public void BuildRebootPacket_BuildsExpectedCommandPayloadAndChecksum()
+    {
+        var raw = R06Protocol.BuildRebootPacket();
+
+        Assert.Equal(16, raw.Length);
+        Assert.Equal(ColmiPacket.CommandReboot, raw[0]);
+        Assert.Equal((byte)0x01, raw[1]);
+        Assert.Equal((byte)0x09, raw[15]);
+        Assert.True(ColmiPacket.IsValid(raw));
+    }
+
+    [Fact]
     public void TryParse_ParsesBatteryPacket()
     {
         var raw = ColmiPacket.Build(ColmiPacket.CommandBattery, 82, 1);
