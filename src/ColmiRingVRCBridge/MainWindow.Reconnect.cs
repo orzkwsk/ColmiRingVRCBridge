@@ -14,8 +14,10 @@ public partial class MainWindow
     private enum ConnectionOperation
     {
         None,
+        ManualScan,
         ManualConnect,
         ManualDisconnect,
+        ManualReboot,
         AutoReconnect
     }
 
@@ -28,6 +30,7 @@ public partial class MainWindow
     private ulong? _batteryHistoryAddress;
     private ConnectionOperation _connectionOperation;
     private bool _autoReconnectEnabled;
+    private bool _autoReconnectSuppressed;
     private bool _reconnectUiInitialized;
 
     protected override void OnContentRendered(EventArgs e)
@@ -55,7 +58,7 @@ public partial class MainWindow
         _ringService.ConnectionChanged += RingService_AutoReconnectConnectionChanged;
         RefreshConnectionControls();
 
-        if (AutoReconnectEnabled && _lastReconnectCandidate is not null && !_ringService.IsConnected)
+        if (AutoReconnectAllowed && _lastReconnectCandidate is not null && !_ringService.IsConnected)
         {
             SetStatus($"Auto reconnect armed for {_lastReconnectCandidate.AddressText}.");
             EnsureReconnectLoop();
@@ -63,6 +66,7 @@ public partial class MainWindow
     }
 
     private bool AutoReconnectEnabled => _autoReconnectEnabled;
+    private bool AutoReconnectAllowed => AutoReconnectEnabled && !_autoReconnectSuppressed;
 
     private void InstallAutoReconnectToggle(bool enabled)
     {
@@ -130,7 +134,8 @@ public partial class MainWindow
 
             if (!_ringService.IsConnected &&
                 _lastReconnectCandidate is not null &&
-                _connectionOperation == ConnectionOperation.None)
+                _connectionOperation == ConnectionOperation.None &&
+                AutoReconnectAllowed)
             {
                 EnsureReconnectLoop();
             }
@@ -170,7 +175,7 @@ public partial class MainWindow
                 return;
             }
 
-            if (!AutoReconnectEnabled ||
+            if (!AutoReconnectAllowed ||
                 _lastReconnectCandidate is null ||
                 _connectionOperation != ConnectionOperation.None)
             {
@@ -190,17 +195,24 @@ public partial class MainWindow
     private void RefreshConnectionControls(bool? connected = null)
     {
         var linkConnected = connected ?? _ringService.IsConnected;
-        var busy = _connectionOperation != ConnectionOperation.None;
+        var manualBusy = _connectionOperation is
+            ConnectionOperation.ManualScan or
+            ConnectionOperation.ManualConnect or
+            ConnectionOperation.ManualDisconnect or
+            ConnectionOperation.ManualReboot;
 
-        ConnectButton.IsEnabled = !busy;
-        RingComboBox.IsEnabled = !linkConnected && !busy;
-        ScanButton.IsEnabled = !linkConnected && !busy;
+        // Manual actions are allowed to preempt an AutoReconnect attempt.
+        // The click handlers first suppress/cancel the background reconnect loop.
+        ConnectButton.IsEnabled = !manualBusy;
+        RingComboBox.IsEnabled = !linkConnected && !manualBusy;
+        ScanButton.IsEnabled = !linkConnected && !manualBusy;
+        RebootButton.IsEnabled = linkConnected && !manualBusy;
     }
 
     private void EnsureReconnectLoop()
     {
         if (_closing ||
-            !AutoReconnectEnabled ||
+            !AutoReconnectAllowed ||
             _lastReconnectCandidate is null ||
             _ringService.IsConnected ||
             _connectionOperation != ConnectionOperation.None ||
@@ -218,7 +230,7 @@ public partial class MainWindow
     {
         while (!cancellationToken.IsCancellationRequested &&
                !_closing &&
-               AutoReconnectEnabled &&
+               AutoReconnectAllowed &&
                !_ringService.IsConnected)
         {
             try
@@ -230,7 +242,7 @@ public partial class MainWindow
                 return;
             }
 
-            if (_closing || !AutoReconnectEnabled || _ringService.IsConnected)
+            if (_closing || !AutoReconnectAllowed || _ringService.IsConnected)
             {
                 return;
             }
@@ -295,6 +307,27 @@ public partial class MainWindow
                 _reconnectAttemptCandidate = null;
                 SetConnectionOperation(ConnectionOperation.None);
             }
+        }
+    }
+
+    private async Task SuppressAutoReconnectAsync()
+    {
+        _autoReconnectSuppressed = true;
+        await StopReconnectLoopAsync();
+        RefreshConnectionControls();
+    }
+
+    private void ResumeAutoReconnect()
+    {
+        _autoReconnectSuppressed = false;
+        RefreshConnectionControls();
+
+        if (AutoReconnectAllowed &&
+            !_ringService.IsConnected &&
+            _lastReconnectCandidate is not null &&
+            _connectionOperation == ConnectionOperation.None)
+        {
+            EnsureReconnectLoop();
         }
     }
 
