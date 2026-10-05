@@ -5,6 +5,8 @@ namespace ColmiRingVRCBridge.Services;
 
 internal sealed class GattColmiTransport : IColmiTransport
 {
+    private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(2);
+
     private readonly GattCharacteristic _rxCharacteristic;
     private readonly GattCharacteristic _txCharacteristic;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
@@ -33,7 +35,9 @@ internal sealed class GattColmiTransport : IColmiTransport
         try
         {
             var status = await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                GattClientCharacteristicConfigurationDescriptorValue.Notify);
+                    GattClientCharacteristicConfigurationDescriptorValue.Notify)
+                .AsTask(cancellationToken)
+                .ConfigureAwait(false);
 
             if (status != GattCommunicationStatus.Success)
             {
@@ -51,8 +55,11 @@ internal sealed class GattColmiTransport : IColmiTransport
             {
                 try
                 {
+                    using var cleanupCts = new CancellationTokenSource(CleanupTimeout);
                     await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                        GattClientCharacteristicConfigurationDescriptorValue.None);
+                            GattClientCharacteristicConfigurationDescriptorValue.None)
+                        .AsTask(cleanupCts.Token)
+                        .ConfigureAwait(false);
                 }
                 catch
                 {
@@ -79,8 +86,10 @@ internal sealed class GattColmiTransport : IColmiTransport
             using var writer = new DataWriter();
             writer.WriteBytes(packet);
             var status = await _rxCharacteristic.WriteValueAsync(
-                writer.DetachBuffer(),
-                GattWriteOption.WriteWithoutResponse);
+                    writer.DetachBuffer(),
+                    GattWriteOption.WriteWithoutResponse)
+                .AsTask(cancellationToken)
+                .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
 
             if (status != GattCommunicationStatus.Success)
@@ -124,8 +133,11 @@ internal sealed class GattColmiTransport : IColmiTransport
         {
             try
             {
+                using var cleanupCts = new CancellationTokenSource(CleanupTimeout);
                 await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                    GattClientCharacteristicConfigurationDescriptorValue.None);
+                        GattClientCharacteristicConfigurationDescriptorValue.None)
+                    .AsTask(cleanupCts.Token)
+                    .ConfigureAwait(false);
             }
             catch
             {
