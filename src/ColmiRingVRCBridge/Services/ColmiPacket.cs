@@ -3,6 +3,7 @@ namespace ColmiRingVRCBridge.Services;
 internal static class ColmiPacket
 {
     public const byte CommandBattery = 0x03;
+    public const byte CommandReboot = 0x08;
     public const byte CommandRealtimeHeartRate = 0x1E;
     public const byte CommandStartRealtime = 0x69;
     public const byte CommandStopRealtime = 0x6A;
