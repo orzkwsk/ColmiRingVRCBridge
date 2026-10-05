@@ -98,6 +98,12 @@ internal sealed class R06Session : IAsyncDisposable
         await _transport.WriteAsync(R06Protocol.BuildContinueHeartRatePacket(), cancellationToken).ConfigureAwait(false);
     }
 
+    public Task RebootAsync(CancellationToken cancellationToken = default)
+    {
+        ThrowIfDisposed();
+        return _transport.WriteAsync(R06Protocol.BuildRebootPacket(), cancellationToken);
+    }
+
     public async Task StopHeartRateSessionAsync(CancellationToken cancellationToken = default)
     {
         if (!IsHeartRateSessionStarted)
