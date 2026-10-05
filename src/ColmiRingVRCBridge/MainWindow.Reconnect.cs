@@ -129,6 +129,10 @@ public partial class MainWindow
                 return;
             }
 
+            // Explicitly enabling auto reconnect also clears any temporary
+            // suppression left by a manual scan/disconnect workflow.
+            _autoReconnectSuppressed = false;
+
             // Ensure an old cancelled loop cannot block the newly enabled state.
             await StopReconnectLoopAsync();
 
