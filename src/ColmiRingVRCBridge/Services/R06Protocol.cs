@@ -40,6 +40,10 @@ internal static class R06Protocol
 
     public static byte[] BuildBatteryPacket() => ColmiPacket.Build(ColmiPacket.CommandBattery);
 
+    public static byte[] BuildRebootPacket() => ColmiPacket.Build(
+        ColmiPacket.CommandReboot,
+        0x01);
+
     public static bool TryParse(ReadOnlySpan<byte> packet, out R06Packet parsed)
     {
         parsed = default;
