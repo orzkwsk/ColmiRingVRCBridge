@@ -76,8 +76,9 @@ internal sealed class R06Session : IAsyncDisposable
             // The caller token scopes connection/initialization only. Once initialization
             // succeeds, telemetry polling owns an independent lifetime until DisposeAsync().
             _sessionCts = new CancellationTokenSource();
-            _heartRatePollingTask = Task.Run(() => HeartRatePollingLoopAsync(_sessionCts.Token));
-            _batteryPollingTask = Task.Run(() => BatteryPollingLoopAsync(_sessionCts.Token));
+            var sessionToken = _sessionCts.Token;
+            _heartRatePollingTask = Task.Run(() => HeartRatePollingLoopAsync(sessionToken));
+            _batteryPollingTask = Task.Run(() => BatteryPollingLoopAsync(sessionToken));
         }
         catch
         {
