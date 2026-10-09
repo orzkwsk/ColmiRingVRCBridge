@@ -4,10 +4,11 @@ These baseline findings are separate from the post-review feature merge gate.
 Compared baseline: `origin/dev` at `49fe23be84c8700d21d626a0bd9044cdf1722814`.
 No unrelated defect fix is included in this integration.
 
-## Issue draft: OSC start/immediate-stop cancellation-source race
+## Issue #7: OSC start/immediate-stop cancellation-source race
 
-No matching existing issue was found in the repository issue search on 2026-10-09.
-This is a ready-to-file draft; a new remote issue was not requested or created.
+Published on 2026-10-09 as a separate issue:
+[GitHub Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7).
+The OSC defect is not included in the manual-connection follow-up on Issue #1.
 
 ### Reproduction
 
@@ -62,16 +63,19 @@ ensure fault cleanup; this review does not implement that fix.
 
 ## Existing Issue #1: manual connection shutdown lifetime
 
-Destination: https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1
+Published follow-up: [GitHub Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1).
 
-The following text is the proposed append to its existing body. The original
-body, state, labels and assignees would be preserved. Automatic approval review
-rejected the body update; no remote change was made. Explicit approval for this
-specific destination and text is pending.
+After explicit user approval, the manual-connection finding was appended on
+2026-10-09. The original body, state, labels and assignees were preserved.
+The following summarizes the published follow-up; it contains only the manual
+connection / BLE lifetime issue.
 
 ---
 
 ## Post-refactor baseline comparison: manual connection shutdown (2026-10-09)
+
+This connection-lifetime defect was already present in origin/dev and was not
+introduced by this refactor. Baseline and feature have the same manual code path.
 
 - **Classification:** BASELINE DEFECT / UNCHANGED by code-path comparison between dev `49fe23be84c8700d21d626a0bd9044cdf1722814` and the post-review telemetry-liveness feature. Hardware reproduction was not performed.
 - **Reproduction / verification scenario:** Start manual Connect, hold or delay device open / GATT discovery, then close the application while the operation is in flight.

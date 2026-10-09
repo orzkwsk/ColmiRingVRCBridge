@@ -78,17 +78,29 @@ are unchanged. Runtime GUI/WinRT ordering remains explicitly unverified.
 
 ## Baseline findings
 
-- **Blocker: 1:** OSC start/immediate-stop crash, reproduced on dev and feature.
-- **Major: 1:** manual connection shutdown lifetime, statically shared by both.
+- **Blocker: 1:** [OSC start/immediate-stop crash — Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7), reproduced on dev and feature.
+- **Major: 1:** [Manual connection shutdown lifetime — Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1), statically shared by both.
 - **Minor:** xUnit2020 warning in R06SessionTests, emitted by both baselines.
 
 See `baseline-issues.md` for reproduction, expected/actual, probable cause,
-affected code and acceptance checks. Repository issue search found no OSC issue;
-a ready-to-file draft is retained instead of creating an unrequested issue.
-Manual lifetime follow-up belongs to existing GitHub Issue #1. Its body update was
-rejected by automatic approval review; the exact append is retained locally and
-explicit destination/content approval is pending. This does not block dev integration.
+affected code and acceptance checks. With explicit user approval on 2026-10-09,
+the manual-lifetime finding was appended to Issue #1 while retaining its original
+body, and the OSC finding was published separately as Issue #7. Both are
+BASELINE DEFECT / UNCHANGED; neither is introduced by this refactor.
 The separate reconnect-recovery PR/branch is not merged or modified here.
+
+## Remaining risks
+
+- [Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1): manual connection
+  cancellation/join is still missing during application shutdown. The common
+  baseline/feature code path is confirmed statically; Windows/R06 runtime behavior
+  still requires delayed-operation tests and GUI/HIL validation.
+- [Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7): OSC immediate-stop
+  NullReferenceException remains unfixed. Both compared versions reproduced 99/100
+  failures with the same logical stack trace and post-stop state. The issue includes
+  reproduction, Expected/Actual, recorded stack, probable cause and regression requirements.
+- GUI and R06 HIL remain pending. Publishing the issues does not change the previous
+  software-gate result or claim that either baseline defect has been fixed.
 
 ## Git topology
 
@@ -166,7 +178,8 @@ Post-merge .NET 8.0.424 checks on dev:
 - Regression, failure-path and serialization cases: PASS as included above.
 - GUI / HIL: NOT TESTED.
 
-The final follow-up commit only records these results; no source/test change
-follows the verified merge. Normal `git push origin dev` is the next operation.
-The final HEAD, push outcome and local/remote equality are reported in chat;
-no assertion of push success is made before that operation returns successfully.
+The verification follow-up was normally pushed at `af36c4c`; local dev and
+origin/dev equality was confirmed. The 2026-10-09 issue-publication follow-up changes
+only Markdown documentation and tracker links. Build/test are not rerun because
+application code, tests, project/build configuration and dependencies are unchanged.
+Documentation diff and whitespace checks are performed before its docs commit/push.
