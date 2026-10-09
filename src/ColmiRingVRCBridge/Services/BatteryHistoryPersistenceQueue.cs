@@ -6,7 +6,8 @@ namespace ColmiRingVRCBridge.Services;
 
 internal readonly record struct BatteryHistoryPersistRequest(
     string FilePath,
-    BatteryHistorySample[] Samples);
+    BatteryHistorySample[] Samples,
+    TaskCompletionSource? Completion = null);
 
 internal static class BatteryHistoryPersistenceQueue
 {
@@ -25,10 +26,29 @@ internal static class BatteryHistoryPersistenceQueue
         Queue.Writer.TryWrite(new BatteryHistoryPersistRequest(filePath, samples));
     }
 
+    // A barrier drains preceding writes without closing the process-wide queue.
+    // Call after telemetry producers have stopped during application shutdown.
+    public static Task FlushAsync()
+    {
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!Queue.Writer.TryWrite(new BatteryHistoryPersistRequest(string.Empty, [], completion)))
+        {
+            throw new InvalidOperationException("Battery history persistence queue is closed.");
+        }
+
+        return completion.Task;
+    }
+
     private static async Task ProcessAsync()
     {
         await foreach (var request in Queue.Reader.ReadAllAsync())
         {
+            if (request.Completion is { } completion)
+            {
+                completion.SetResult();
+                continue;
+            }
+
             try
             {
                 var tempPath = request.FilePath + ".tmp";
@@ -53,9 +73,10 @@ internal static class BatteryHistoryPersistenceQueue
 
                 File.Move(tempPath, request.FilePath, overwrite: true);
             }
-            catch
+            catch (Exception ex)
             {
                 // Diagnostics persistence must never affect live BLE telemetry.
+                System.Diagnostics.Debug.WriteLine($"Battery history persistence failed: {ex}");
             }
         }
     }

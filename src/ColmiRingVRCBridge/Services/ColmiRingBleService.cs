@@ -235,8 +235,10 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     {
         var session = _session;
         _session = null;
-        if (session is not null)
+        try
         {
+            if (session is not null)
+            {
             UnhookSession(session);
             try
             {
@@ -254,19 +256,22 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
             {
                 ProtocolWarning?.Invoke($"BLE session cleanup failed: {ex.Message}");
             }
+            }
         }
-
-        if (_device is not null)
+        finally
         {
-            _device.ConnectionStatusChanged -= Device_ConnectionStatusChanged;
+            if (_device is not null)
+            {
+                _device.ConnectionStatusChanged -= Device_ConnectionStatusChanged;
+            }
+
+            _uartService?.Dispose();
+            _uartService = null;
+            _device?.Dispose();
+            _device = null;
+
+            ConnectionChanged?.Invoke(false);
         }
-
-        _uartService?.Dispose();
-        _uartService = null;
-        _device?.Dispose();
-        _device = null;
-
-        ConnectionChanged?.Invoke(false);
     }
 
     public Task RebootAsync(CancellationToken cancellationToken = default)

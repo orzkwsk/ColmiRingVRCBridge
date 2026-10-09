@@ -345,23 +345,18 @@ internal sealed class R06Session : IAsyncDisposable
 
         cts.Cancel();
 
-        foreach (var task in new[] { heartRateTask, batteryTask })
+        try
         {
-            if (task is null)
-            {
-                continue;
-            }
-
-            try
-            {
-                await task.ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-            }
+            await Task.WhenAll(heartRateTask ?? Task.CompletedTask, batteryTask ?? Task.CompletedTask)
+                .ConfigureAwait(false);
         }
-
-        cts.Dispose();
+        catch (OperationCanceledException) when (cts.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            cts.Dispose();
+        }
     }
 
     private void ThrowIfDisposed()
@@ -387,21 +382,27 @@ internal sealed class R06Session : IAsyncDisposable
         }
 
         _disposed = true;
-        await StopPollingAsync().ConfigureAwait(false);
-
-        if (_transportStarted && IsHeartRateSessionStarted)
+        try
         {
-            try
-            {
-                await StopHeartRateSessionAsync().ConfigureAwait(false);
-            }
-            catch
-            {
-            }
+            await StopPollingAsync().ConfigureAwait(false);
         }
+        finally
+        {
+            if (_transportStarted && IsHeartRateSessionStarted)
+            {
+                try
+                {
+                    await StopHeartRateSessionAsync().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"Failed to stop R06 measurement during disposal: {ex}");
+                }
+            }
 
-        Volatile.Write(ref _heartRateSessionStarted, 0);
-        _transport.PacketReceived -= Transport_PacketReceived;
-        await _transport.DisposeAsync().ConfigureAwait(false);
+            Volatile.Write(ref _heartRateSessionStarted, 0);
+            _transport.PacketReceived -= Transport_PacketReceived;
+            await _transport.DisposeAsync().ConfigureAwait(false);
+        }
     }
 }

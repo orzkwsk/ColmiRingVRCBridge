@@ -4,14 +4,28 @@ using System.Text;
 
 namespace ColmiRingVRCBridge.Services;
 
-internal sealed class OscSender : IDisposable
+internal interface IOscSender : IDisposable
+{
+    Task SendFloatAsync(string address, float value);
+    Task SendIntAsync(string address, int value);
+}
+
+internal sealed class OscSender : IOscSender
 {
     private readonly UdpClient _udpClient;
 
     public OscSender(string host, int port)
     {
         _udpClient = new UdpClient();
-        _udpClient.Connect(host, port);
+        try
+        {
+            _udpClient.Connect(host, port);
+        }
+        catch
+        {
+            _udpClient.Dispose();
+            throw;
+        }
     }
 
     public Task SendFloatAsync(string address, float value)
