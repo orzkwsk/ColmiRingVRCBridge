@@ -192,21 +192,17 @@ Before adding hard timeouts, verify target-Windows behavior for:
 
 Avoid a timeout implementation that merely abandons a still-running WinRT operation.
 
-## Product/API decision still required
+## Product/API status
 
 ### OSC behavior when HR becomes stale
 
-Internal validity is now implemented and stale BPM is no longer treated as fresh input.
+The `0.1.x` preview contract is selected in the release README: stop emitting new
+BPM values while HR is stale and resume when a fresh sample is available. VRChat
+may retain the last received value. The preview does not send an automatic zero
+or a separate validity parameter. This review does not change that contract.
 
-Still decide the public behavior:
-
-- stop sending BPM while stale (current internal behavior)
-- send `0` once on Fresh -> Stale
-- expose `/HeartRateValid`
-- send both zero + validity flag
-- intentionally preserve the last parameter value
-
-This must be decided before treating stale behavior as a stable bridge API contract.
+Zero/validity output is a future product/API extension, not an unresolved gate
+for integrating the post-review fixes.
 
 ### User-facing telemetry-state detail
 
@@ -255,7 +251,12 @@ Determine the minimum successful recovery level:
 
 ## Promotion gate for `dev`
 
-Do not promote until all of the following are true:
+Updated 2026-10-09 after comparing the post-review feature with `origin/dev` at
+`49fe23be84c8700d21d626a0bd9044cdf1722814`. The original refactor is already an
+ancestor of dev. Gate the additional fixes on newly introduced or worsened
+Blocker/Major findings, and track unchanged baseline defects separately.
+
+### Software automated gate
 
 - [x] HR freshness/stale state exists independently from BLE connection.
 - [x] Stale BPM is not unconditionally treated as live OSC input.
@@ -268,9 +269,32 @@ Do not promote until all of the following are true:
 - [x] Invalid Int + Normalize255 configuration is rejected by the model.
 - [x] Protocol/session logic has a transport test seam.
 - [x] Hardware-independent packet/polling/freshness tests exist.
-- [ ] Release build succeeds locally.
-- [ ] Unit tests pass locally.
-- [ ] R06 remove/re-wear behavior is measured with the new diagnostics.
-- [ ] Minimum soft HR recovery sequence is identified or explicitly documented as unresolved.
-- [ ] OSC stale-source public behavior is explicitly selected before being treated as stable behavior.
-- [ ] README matches the final validated guarantee set.
+- [x] Release and Debug builds succeed locally with .NET 8.0.424.
+- [x] Release tests pass: 29/29; Debug tests pass: 30/30.
+- [x] Additional failure-path, record API and serialization regression tests pass.
+- [x] The dev baseline and feature reproduce the same existing OSC stop crash.
+- [x] Manual-connect shutdown lifetime has no newly introduced race in code-path comparison.
+- [x] Branch Blocker = 0 and Branch Major = 0 after preserving both named-argument APIs.
+- [x] OSC stale-source preview behavior is explicitly selected in the release README.
+- [x] The target dev README describes the current guarantees and pending hardware limits.
+
+The existing xUnit2020 warning occurs on both baseline and feature; it is recorded
+without suppression. Baseline OSC and manual-connect shutdown issues are tracked
+in `baseline-issues.md` and do not independently block these fixes.
+
+### GUI gate
+
+- [ ] GUI smoke: scan/connect, tooltip/graphs, rapid reconnect toggles and close.
+
+Not performed in this review. GUI status must remain explicit in the merge report.
+
+### HIL gate
+
+- [ ] R06 remove/re-wear behavior measured with the new diagnostics.
+- [ ] Minimum soft HR recovery sequence validated on R06.
+- [ ] Windows BLE/GATT timeout and close-during-connect behavior validated.
+
+HIL is pending. The soft recovery sequence remains explicitly unresolved; no
+recovery traffic or guessed protocol change is introduced by these fixes.
+GUI/HIL pending alone does not block a software-only integration under the current
+review instructions. See `post-refactor-review.md` for the comparison and decision.

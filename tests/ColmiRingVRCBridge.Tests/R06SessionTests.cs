@@ -6,6 +6,55 @@ namespace ColmiRingVRCBridge.Tests;
 public sealed class R06SessionTests
 {
     [Fact]
+    public async Task Dispose_ImmediatelyAfterStartStopsPollingAndReleasesTransport()
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            var transport = new FakeTransport();
+            var session = new R06Session(transport, handshakeDelay: TimeSpan.Zero);
+            await session.StartAsync();
+            await session.DisposeAsync();
+            Assert.True(transport.Disposed);
+            Assert.False(session.IsHeartRateSessionStarted);
+        }
+    }
+
+    [Fact]
+    public async Task Dispose_AfterPollingSubscriberFaultStillReleasesTransport()
+    {
+        var transport = new FakeTransport { RemainingPollFailures = 1 };
+        var session = new R06Session(transport, handshakeDelay: TimeSpan.Zero);
+        var warningRaised = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.ProtocolWarning += _ =>
+        {
+            warningRaised.SetResult();
+            throw new InvalidOperationException("Injected subscriber failure.");
+        };
+        await session.StartAsync();
+        await warningRaised.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => session.DisposeAsync().AsTask());
+        Assert.True(transport.Disposed);
+        Assert.False(session.IsHeartRateSessionStarted);
+    }
+
+    [Fact]
+    public async Task CancellationDuringHandshakeIsCleanedUpWithStopAndUnsubscription()
+    {
+        var transport = new FakeTransport();
+        var session = new R06Session(transport, handshakeDelay: TimeSpan.FromHours(1));
+        using var cts = new CancellationTokenSource();
+        var start = session.StartAsync(cts.Token);
+        cts.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => start);
+        await session.DisposeAsync();
+        Assert.True(transport.StopWritten);
+        Assert.True(transport.Disposed);
+        var before = session.GetDiagnostics().RawNotificationCount;
+        transport.Inject(ColmiPacket.Build(ColmiPacket.CommandRealtimeHeartRate, 72));
+        Assert.Equal(before, session.GetDiagnostics().RawNotificationCount);
+    }
+
+    [Fact]
     public async Task Polling_SurvivesTransientWriteFailureAndResetsConsecutiveCount()
     {
         await using var transport = new FakeTransport
@@ -184,6 +233,8 @@ public sealed class R06SessionTests
         }
 
         public event Action<byte[]>? PacketReceived;
+        public bool Disposed { get; private set; }
+        public bool StopWritten { get; private set; }
 
         public Task StartAsync(CancellationToken cancellationToken = default)
         {
@@ -194,6 +245,10 @@ public sealed class R06SessionTests
         public Task WriteAsync(byte[] packet, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            if (packet[0] == ColmiPacket.CommandStopRealtime)
+            {
+                StopWritten = true;
+            }
 
             if (packet.Length > 0 &&
                 packet[0] == ColmiPacket.CommandRealtimeHeartRate &&
@@ -208,6 +263,10 @@ public sealed class R06SessionTests
 
         public void Inject(byte[] packet) => PacketReceived?.Invoke(packet);
 
-        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
     }
 }
