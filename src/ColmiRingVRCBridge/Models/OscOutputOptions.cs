@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ColmiRingVRCBridge.Models;
 
 public enum OscValueType
@@ -12,6 +14,7 @@ public enum ScalingMode
     RawBpm
 }
 
+[method: JsonConstructor]
 public sealed record OscOutputOptions(
     string Host,
     int Port,
@@ -20,6 +23,21 @@ public sealed record OscOutputOptions(
     ScalingMode Scaling,
     TimeSpan Interval)
 {
+    // origin/dev used lowercase parameter names. Keep those named-argument calls
+    // source-compatible as well as the original positional-record API. The optional
+    // marker only distinguishes overload signatures; validation is always applied.
+    public OscOutputOptions(
+        string host,
+        int port,
+        string parameterName,
+        OscValueType valueType,
+        ScalingMode scaling,
+        TimeSpan interval,
+        bool legacyNamedArguments = true)
+        : this(host, port, parameterName, valueType, scaling, interval)
+    {
+    }
+
     // Retain the positional-record API (named arguments, deconstruction and with).
     public OscValueType ValueType { get; init; } = ValidateValueType(ValueType, Scaling);
 

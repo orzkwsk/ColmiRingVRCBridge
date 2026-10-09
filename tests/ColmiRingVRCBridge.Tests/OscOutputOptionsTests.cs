@@ -6,6 +6,20 @@ namespace ColmiRingVRCBridge.Tests;
 public sealed class OscOutputOptionsTests
 {
     [Fact]
+    public void DevNamedArgumentApiRemainsCompatibleAndValidated()
+    {
+        var options = new OscOutputOptions(
+            host: "127.0.0.1", port: 9000, parameterName: "HeartRate",
+            valueType: OscValueType.Int, scaling: ScalingMode.RawBpm,
+            interval: TimeSpan.FromSeconds(3));
+        Assert.Equal(ScalingMode.RawBpm, options.Scaling);
+        Assert.Throws<ArgumentException>(() => new OscOutputOptions(
+            host: "127.0.0.1", port: 9000, parameterName: "HeartRate",
+            valueType: OscValueType.Int, scaling: ScalingMode.Normalize255,
+            interval: TimeSpan.FromSeconds(3)));
+    }
+
+    [Fact]
     public void PositionalRecordApiSupportsNamedArgumentsDeconstructionAndCopy()
     {
         var options = new OscOutputOptions(
