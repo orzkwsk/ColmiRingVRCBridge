@@ -5,6 +5,15 @@ Issue #7 follow-up: the separate OSC lifetime fix is now integrated into dev by
 99/100 → 0/100 reproduction and post-integration checks. The original comparison
 and refactor verification below remain historical evidence.
 
+Issue #1 / PR #6 follow-up: `feature/reconnect-recovery` now includes current dev
+and the tracked manual/automatic BLE operation lifetime fix `100416e`.
+After separating experimental Reboot, Debug 73/73 and Release 72/72 PASS,
+including all 11 OSC regressions. See [Issue #1 final reconnect review and HIL
+scope](issue-1-reconnect-review.md). Natural link loss/recovery PASS; controlled
+distance loss is a non-blocking coverage Note. Reboot observations and unknown
+post-reboot HR error code 2 move to independent [Issue #8](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/8).
+Final CI/merge and post-merge verification are recorded on PR #6 / Issue #1.
+
 This report supersedes the first decision committed as `8c618a3`. That decision
 counted unchanged repository defects against the feature gate. Under the follow-up
 instructions, the gate covers newly introduced/worsened defects and inconsistent
@@ -84,7 +93,7 @@ are unchanged. Runtime GUI/WinRT ordering remains explicitly unverified.
 ## Baseline findings
 
 - **Original Blocker: 1, now resolved:** [OSC start/immediate-stop crash — Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7), originally reproduced on dev and feature; fixed independently by `6014fa1` ([verification](issue-7-osc-lifecycle.md)).
-- **Major: 1:** [Manual connection shutdown lifetime — Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1), statically shared by both.
+- **Major: 1 on the reviewed dev baseline:** [Manual connection shutdown lifetime — Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1), statically shared by both. Fixed and software-verified on [PR #6](https://github.com/orzkwsk/ColmiRingVRCBridge/pull/6); see [remaining HIL gate](issue-1-reconnect-review.md).
 - **Minor:** xUnit2020 warning in R06SessionTests, emitted by both baselines.
 
 See `baseline-issues.md` for reproduction, expected/actual, probable cause,
@@ -96,16 +105,20 @@ The separate reconnect-recovery PR/branch is not merged or modified here.
 
 ## Remaining risks
 
-- [Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1): manual connection
-  cancellation/join is still missing during application shutdown. The common
-  baseline/feature code path is confirmed statically; Windows/R06 runtime behavior
-  still requires delayed-operation tests and GUI/HIL validation.
+- [Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1): the reviewed dev
+  baseline lacks manual connection cancellation/join during shutdown. The fix on
+  [PR #6](https://github.com/orzkwsk/ColmiRingVRCBridge/pull/6) passes delayed-stage,
+  timeout/fault, late-result and 100-run shutdown tests. Principal reconnect HIL
+  paths PASS; [controlled distance loss](issue-1-reconnect-review.md) is a
+  non-blocking Note. Experimental reboot and post-reboot HR investigation are
+  tracked separately in [Issue #8](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/8).
 - [Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7): resolved separately
   by `6014fa1`. Fresh baseline 99/100 crashes → fixed dev 0/100; every CTS disposed
   and worker joined. Debug 41/41 and Release 40/40 tests PASS after integration.
   See [OSC lifetime contract and remaining network timing limits](issue-7-osc-lifecycle.md).
-- GUI and R06 HIL remain pending for the broader application/Issue #1. They are not
-  Issue #7 acceptance prerequisites; its real UDP and deterministic lifetime tests PASS.
+- Principal Issue #1 GUI/R06 reconnect paths PASS in the follow-up review.
+  Controlled distance loss remains a non-blocking Note; experimental reboot HIL
+  remains separate in Issue #8. Issue #7's real UDP and lifetime tests still PASS.
 
 ## Git topology
 
