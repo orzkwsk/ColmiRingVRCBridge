@@ -14,6 +14,10 @@ distance loss is a non-blocking coverage Note. Reboot observations and unknown
 post-reboot HR error code 2 move to independent [Issue #8](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/8).
 Final CI/merge and post-merge verification are recorded on PR #6 / Issue #1.
 
+PR #6 is now merged normally into dev at `ba9c079`; post-merge Debug/Release
+builds and tests PASS (73/73 and 72/72), and Issue #1 is completed. Experimental
+Reboot remains open in Issue #8. See [completed integration](issue-1-reconnect-review.md#completed-integration--2026-10-10-jst).
+
 This report supersedes the first decision committed as `8c618a3`. That decision
 counted unchanged repository defects against the feature gate. Under the follow-up
 instructions, the gate covers newly introduced/worsened defects and inconsistent
@@ -93,7 +97,7 @@ are unchanged. Runtime GUI/WinRT ordering remains explicitly unverified.
 ## Baseline findings
 
 - **Original Blocker: 1, now resolved:** [OSC start/immediate-stop crash — Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7), originally reproduced on dev and feature; fixed independently by `6014fa1` ([verification](issue-7-osc-lifecycle.md)).
-- **Major: 1 on the reviewed dev baseline:** [Manual connection shutdown lifetime — Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1), statically shared by both. Fixed and software-verified on [PR #6](https://github.com/orzkwsk/ColmiRingVRCBridge/pull/6); see [remaining HIL gate](issue-1-reconnect-review.md).
+- **Original Major: 1, now resolved:** [Manual connection shutdown lifetime — Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1), statically shared by both original baselines. Fixed by merged [PR #6](https://github.com/orzkwsk/ColmiRingVRCBridge/pull/6) at `ba9c079`; see [final reconnect verification](issue-1-reconnect-review.md).
 - **Minor:** xUnit2020 warning in R06SessionTests, emitted by both baselines.
 
 See `baseline-issues.md` for reproduction, expected/actual, probable cause,
@@ -105,13 +109,12 @@ The separate reconnect-recovery PR/branch is not merged or modified here.
 
 ## Remaining risks
 
-- [Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1): the reviewed dev
-  baseline lacks manual connection cancellation/join during shutdown. The fix on
-  [PR #6](https://github.com/orzkwsk/ColmiRingVRCBridge/pull/6) passes delayed-stage,
-  timeout/fault, late-result and 100-run shutdown tests. Principal reconnect HIL
-  paths PASS; [controlled distance loss](issue-1-reconnect-review.md) is a
-  non-blocking Note. Experimental reboot and post-reboot HR investigation are
-  tracked separately in [Issue #8](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/8).
+- [Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1): resolved by
+  merged [PR #6](https://github.com/orzkwsk/ColmiRingVRCBridge/pull/6). Post-merge
+  delayed-stage, timeout/fault, late-result and 100-run shutdown tests PASS.
+  Principal reconnect HIL paths PASS; [controlled distance loss](issue-1-reconnect-review.md)
+  is a non-blocking Note. Experimental reboot and post-reboot HR investigation
+  remain open separately in [Issue #8](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/8).
 - [Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7): resolved separately
   by `6014fa1`. Fresh baseline 99/100 crashes → fixed dev 0/100; every CTS disposed
   and worker joined. Debug 41/41 and Release 40/40 tests PASS after integration.

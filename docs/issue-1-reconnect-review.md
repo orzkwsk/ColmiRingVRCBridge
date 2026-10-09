@@ -162,3 +162,29 @@ HIL paths above PASS. Then mark Ready and use a normal merge preserving history,
 with the expected PR head checked immediately before merge. Rerun Debug/Release
 builds and complete test suites on dev before appending final evidence to Issue #1
 and closing it as completed. Issue #8 stays open independently.
+
+## Completed integration — 2026-10-10 JST
+
+**MERGED / ISSUE #1 COMPLETED.** Final PR head
+`f2e4a9cfef38e1ecf594b11d56938c1a2a10cb0a` passed Windows CI #23, including
+Release build/tests and self-contained win-x64 publish smoke. PR #6 was changed
+from Draft to Ready, its final 14-file remote diff was checked for remaining
+Reboot paths, and it was merged normally with the expected head SHA pinned.
+
+Merge commit: `ba9c079cd2aa7b558215a6366fa7ea8ff212f4fe`, parents current dev
+`4cee02e9bd7f8b11ffe2a501913746cb5461f526` and the final PR head above.
+The merged tree equals the tested feature tree. Local dev was fast-forwarded
+to origin/dev without rewriting history.
+
+Post-merge checks on dev: Debug build PASS; Release build PASS; Debug 73/73 and
+Release 72/72 tests PASS, including all 11 OSC regressions, BLE lifetime 24/24,
+priority/join 8/8, serialization/API 2/2, and the 100-run shutdown stress test.
+Existing xUnit2020 remains unsuppressed. Blocker 0 / Major 0 / Minor 0;
+controlled distance loss remains a non-blocking HIL Note.
+
+Issue #1 received an append preserving its original history, documenting the
+merge, checks, HIL and Deferred / moved to Issue #8 scope, and was closed as
+completed. Issue #8 remains open. This final integration record and tracker-link
+update are documentation-only; no code, tests, build configuration or dependencies
+changed after the post-merge checks, so those checks are not repeated for this
+docs commit.
