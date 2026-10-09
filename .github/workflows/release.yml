@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'SemVer without leading v (for example: 0.1.0-preview.1)'
+        description: 'SemVer without leading v (for example: 0.1.0-preview.2)'
         required: true
-        default: '0.1.0-preview.1'
+        default: '0.1.0-preview.2'
         type: string
       prerelease:
         description: 'Mark the GitHub Release as a prerelease'

@@ -2,7 +2,7 @@
 
 Windows WPF bridge for reading realtime heart-rate telemetry from QRing-compatible COLMI smart rings over Bluetooth Low Energy and forwarding it to VRChat OSC.
 
-> **Status:** `v0.1.0-preview.1` is the first public preview. The currently validated hardware target is **COLMI R06**. This software is experimental and is not intended for medical diagnosis, treatment, or safety-critical monitoring.
+> **Status:** `v0.1.0-preview.2` improves OSC, reconnect and shutdown reliability. The currently validated hardware target is **COLMI R06**. This software is experimental and is not intended for medical diagnosis, treatment, or safety-critical monitoring.
 
 ## What it does
 
@@ -101,6 +101,11 @@ This behavior is part of the `0.1.x` preview contract and may be expanded in a l
 - Reconnect targets the last successful Bluetooth address directly.
 - Retry delay is intentionally fixed at approximately one second while automatic reconnect is enabled.
 - The actual wall-clock interval can be longer because Windows BLE/GATT connection attempts may themselves take time to fail or complete.
+- BLE/GATT connection attempts have a bounded deadline, so a stalled attempt releases the UI for another operation.
+- Manual Scan or Connect takes priority over automatic reconnect and cancels the current automatic attempt.
+- Manual Disconnect suppresses automatic retries even when Auto remains checked. Connect manually or toggle Auto off and on to resume.
+- Closing the application cancels an in-progress manual connection and waits for its cleanup.
+- A Windows BLE operation that finishes late cannot replace the current connection or restore an obsolete session.
 
 The fixed retry cadence is intentional: connection recovery takes priority over reducing retry activity while automatic reconnect is enabled.
 
@@ -123,7 +128,7 @@ Current persisted data includes:
 
 OSC is sent over UDP to the host/port configured in the UI; the default is localhost (`127.0.0.1:9000`).
 
-## Known limitations of v0.1.0-preview.1
+## Known limitations of v0.1.0-preview.2
 
 - R06 is the only hardware target validated so far.
 - Automatic recovery from an HR measurement-session stall after remove/re-wear is not yet guaranteed.
@@ -131,6 +136,8 @@ OSC is sent over UDP to the host/port configured in the UI; the default is local
 - BLE/GATT timeout behavior depends partly on Windows/WinRT behavior.
 - Stale HR currently stops new OSC BPM transmission rather than clearing the remote parameter.
 - Release packaging currently targets Windows x64 only.
+- Controlled distance-induced Bluetooth link-loss recovery has not been tested; this is a non-blocking hardware-validation note.
+- Experimental R06 reboot and post-reboot HR recovery remain under investigation in [Issue #8](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/8). Reboot is not available in this release.
 
 Detailed engineering status is tracked in `docs/adversarial-review-action-list.md`.
 

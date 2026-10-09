@@ -67,82 +67,91 @@ public partial class MainWindow : Window
 
     private async void ScanButton_Click(object sender, RoutedEventArgs e)
     {
-        ScanButton.IsEnabled = false;
-        RingComboBox.IsEnabled = false;
-        SetStatus("Scanning for COLMI / QRing-compatible BLE devices...");
-
-        try
+        var keepSuppressed = false;
+        await RunManualOperationAsync(ConnectionOperation.ManualScan, async token =>
         {
-            var devices = await _ringService.ScanAsync(TimeSpan.FromSeconds(6));
+            SetStatus("Scanning for COLMI / QRing-compatible BLE devices...");
+            var devices = await _ringService.ScanAsync(TimeSpan.FromSeconds(6), token);
+            token.ThrowIfCancellationRequested();
+            if (_closing) return;
             RingComboBox.ItemsSource = devices;
             if (devices.Count > 0)
             {
                 RingComboBox.SelectedIndex = 0;
-                SetStatus($"Scan complete: {devices.Count} candidate(s) found.");
+                keepSuppressed = true;
+                SetStatus($"Scan complete: {devices.Count} candidate(s) found. Auto reconnect is paused while selecting a device.");
             }
-            else
-            {
-                SetStatus("Scan complete: no compatible candidate found.");
-            }
-        }
-        catch (Exception ex)
-        {
-            SetStatus($"BLE scan failed: {ex.Message}");
-        }
-        finally
-        {
-            RefreshConnectionControls();
-        }
+            else SetStatus("Scan complete: no compatible candidate found.");
+        }, () => !keepSuppressed);
     }
 
     private async void ConnectButton_Click(object sender, RoutedEventArgs e)
     {
-        var operation = _ringService.IsConnected
-            ? ConnectionOperation.ManualDisconnect
-            : ConnectionOperation.ManualConnect;
-        SetConnectionOperation(operation);
-
-        try
+        var operation = _ringService.IsConnected ? ConnectionOperation.ManualDisconnect : ConnectionOperation.ManualConnect;
+        await RunManualOperationAsync(operation, async token =>
         {
             if (operation == ConnectionOperation.ManualDisconnect)
             {
                 SetStatus("Disconnecting ring...");
                 await _ringService.DisconnectAsync();
+                token.ThrowIfCancellationRequested();
+                if (_closing) return;
                 ClearDeviceDetails();
+                SetStatus("Ring disconnected. Auto reconnect is paused after a manual disconnect.");
                 return;
             }
-
             if (RingComboBox.SelectedItem is not RingDeviceCandidate selected)
             {
                 SetStatus("Select a ring first.");
                 return;
             }
-
             ResetHeartRateStats();
             Volatile.Write(ref _batterySnapshot, BatterySnapshot.Empty);
             EnsureBatteryHistory(selected.BluetoothAddress);
-
             SetStatus($"Connecting to {selected.Name}...");
             BluetoothIdTextBlock.Text = selected.AddressText;
-            var info = await _ringService.ConnectAsync(selected);
-
+            var info = await _ringService.ConnectAsync(selected, token);
+            token.ThrowIfCancellationRequested();
+            if (_closing) return;
             SerialModelTextBlock.Text = $"Serial: {TextOrDash(info.Serial)}    Model: {TextOrDash(info.Model)}";
             HwFwTextBlock.Text = $"HW: {TextOrDash(info.HardwareVersion)}    FW: {TextOrDash(info.FirmwareVersion)}";
             SetStatus("Ring connected. Realtime heart-rate acquisition started.");
+        }, () => operation == ConnectionOperation.ManualConnect);
+    }
+
+    private async Task RunManualOperationAsync(ConnectionOperation kind, Func<CancellationToken, Task> body,
+        Func<bool> resumeReconnect)
+    {
+        if (_closing) return;
+        _autoReconnectSuppressed = true; // Preference is unchanged; prevent a new low-priority loop.
+        try
+        {
+            var task = _connectionOperations.RunAsync(kind, async token =>
+            {
+                await SuppressAutoReconnectAsync();
+                token.ThrowIfCancellationRequested();
+                await body(token);
+            });
+            RefreshConnectionControls();
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            if (!_closing && _connectionOperation == ConnectionOperation.None) SetStatus($"{kind} cancelled.");
         }
         catch (Exception ex)
         {
-            SetStatus($"Connection failed: {ex.Message}");
-            await _ringService.DisconnectAsync();
-            ClearDeviceDetails();
+            if (!_closing && _connectionOperation == ConnectionOperation.None)
+            {
+                SetStatus($"{kind} failed: {ex.Message}");
+                if (!_ringService.IsConnected) ClearDeviceDetails();
+            }
         }
         finally
         {
-            SetConnectionOperation(ConnectionOperation.None);
-            if (AutoReconnectEnabled && !_ringService.IsConnected && _lastReconnectCandidate is not null)
-            {
-                EnsureReconnectLoop();
-            }
+            RefreshConnectionControls();
+            if (!_closing && _connectionOperation == ConnectionOperation.None && resumeReconnect())
+                ResumeAutoReconnect();
         }
     }
 
@@ -471,6 +480,7 @@ public partial class MainWindow : Window
     {
         if (_closing)
         {
+            e.Cancel = true;
             return;
         }
 
@@ -480,9 +490,36 @@ public partial class MainWindow : Window
 
         try
         {
-            await ShutdownReconnectAsync();
-            await _oscOutputService.DisposeAsync();
-            await _ringService.DisposeAsync();
+            try
+            {
+                await ShutdownReconnectAsync();
+            }
+            finally
+            {
+                try
+                {
+                    await _oscOutputService.DisposeAsync();
+                }
+                finally
+                {
+                    try
+                    {
+                        await _ringService.DisposeAsync();
+                    }
+                    finally
+                    {
+                        await BatteryHistoryPersistenceQueue.FlushAsync();
+#if DEBUG
+                        await ShutdownDebugTelemetryLoggingAsync();
+#endif
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // All teardown finally blocks still run. Observe failures at the async-void boundary.
+            System.Diagnostics.Debug.WriteLine($"Application shutdown cleanup failed: {ex}");
         }
         finally
         {

@@ -34,8 +34,8 @@ public partial class MainWindow
             _ringService.ConnectionChanged += DebugTelemetry_ConnectionChanged;
             _ringService.BatteryUpdated += DebugTelemetry_BatteryUpdated;
             _ringService.ProtocolWarning += DebugTelemetry_ProtocolWarning;
+            _ringService.ConnectionProgress += DebugTelemetry_ConnectionProgress;
             _ringService.HeartRateProtocolProbePacketObserved += DebugTelemetry_HeartRateProtocolProbePacketObserved;
-            Closed += MainWindow_DebugTelemetryClosed;
         }
         catch (Exception ex)
         {
@@ -88,7 +88,8 @@ public partial class MainWindow
             {
                 "hr_protocol_probe_v1",
                 "battery_freshness_v1",
-                "telemetry_liveness_v1"
+                "telemetry_liveness_v1",
+                "ble_connect_stage_v1"
             }
         };
     }
@@ -163,6 +164,16 @@ public partial class MainWindow
         LogDebugTelemetryEvent("protocol_warning", new { message });
     }
 
+    private void DebugTelemetry_ConnectionProgress(string stage)
+    {
+        LogDebugTelemetryEvent("connection_progress", new
+        {
+            stage,
+            operation = _connectionOperation.ToString(),
+            pendingLateBleOperations = BoundedBleOperation.PendingCompletions
+        });
+    }
+
     private void DebugTelemetry_HeartRateProtocolProbePacketObserved(HeartRateProtocolProbePacket packet)
     {
         var diagnostics = _ringService.GetTelemetryDiagnostics();
@@ -195,18 +206,13 @@ public partial class MainWindow
         _debugTelemetryLogger?.LogEvent(type, data);
     }
 
-    private async void MainWindow_DebugTelemetryClosed(object? sender, EventArgs e)
+    private async Task ShutdownDebugTelemetryLoggingAsync()
     {
-        Closed -= MainWindow_DebugTelemetryClosed;
         _ringService.ConnectionChanged -= DebugTelemetry_ConnectionChanged;
         _ringService.BatteryUpdated -= DebugTelemetry_BatteryUpdated;
         _ringService.ProtocolWarning -= DebugTelemetry_ProtocolWarning;
+        _ringService.ConnectionProgress -= DebugTelemetry_ConnectionProgress;
         _ringService.HeartRateProtocolProbePacketObserved -= DebugTelemetry_HeartRateProtocolProbePacketObserved;
-        await ShutdownDebugTelemetryLoggingAsync();
-    }
-
-    private async Task ShutdownDebugTelemetryLoggingAsync()
-    {
         var logger = _debugTelemetryLogger;
         _debugTelemetryLogger = null;
         if (logger is not null)

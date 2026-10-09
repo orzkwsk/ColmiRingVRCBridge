@@ -33,8 +33,6 @@ internal sealed class BatteryHistoryStore
 
     public void Add(BatteryState battery, DateTimeOffset timestamp)
     {
-        BatteryHistorySample[] persistenceSnapshot;
-
         lock (_gate)
         {
             var sample = new BatteryHistorySample(timestamp, Math.Clamp(battery.Percent, 0, 100), battery.Charging);
@@ -51,10 +49,9 @@ internal sealed class BatteryHistoryStore
             }
 
             _samples.Add(sample);
-            persistenceSnapshot = _samples.ToArray();
+            // Preserve snapshot order across concurrent notification callbacks.
+            BatteryHistoryPersistenceQueue.Enqueue(_filePath, _samples.ToArray());
         }
-
-        BatteryHistoryPersistenceQueue.Enqueue(_filePath, persistenceSnapshot);
     }
 
     public IReadOnlyList<BatteryHistorySample> Snapshot(DateTimeOffset now)

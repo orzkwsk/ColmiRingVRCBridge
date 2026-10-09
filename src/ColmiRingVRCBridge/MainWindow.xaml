@@ -14,7 +14,7 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="StatusTextBlock" Text="Ready" VerticalAlignment="Center"/>
-                <TextBlock x:Name="VersionTextBlock" Grid.Column="1" Text="PoC 0.1.0" Foreground="Gray"/>
+                <TextBlock x:Name="VersionTextBlock" Grid.Column="1" Text="v0.1.0-preview.2" Foreground="Gray"/>
             </Grid>
         </Border>
 
