@@ -10,6 +10,12 @@ Published on 2026-10-09 as a separate issue:
 [GitHub Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7).
 The OSC defect is not included in the manual-connection follow-up on Issue #1.
 
+**Resolution follow-up:** fixed independently in `6014fa1` on a dedicated branch
+from fresh dev, then fast-forward integrated into dev. The fresh pre-edit baseline
+again crashed 99/100; identical post-fix and post-integration probes crashed 0/100.
+See [Issue #7 lifetime fix and verification](issue-7-osc-lifecycle.md). The original
+baseline observations below are retained as historical evidence.
+
 ### Reproduction
 
 Run the identical `SharedOscProbe.cs` harness against the dev snapshot and feature.

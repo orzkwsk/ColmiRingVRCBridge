@@ -1,5 +1,10 @@
 # Post-refactor review: baseline comparison and merge re-evaluation — 2026-10-09
 
+Issue #7 follow-up: the separate OSC lifetime fix is now integrated into dev by
+`6014fa1`. See [Issue #7 fix and verification](issue-7-osc-lifecycle.md) for fresh
+99/100 → 0/100 reproduction and post-integration checks. The original comparison
+and refactor verification below remain historical evidence.
+
 This report supersedes the first decision committed as `8c618a3`. That decision
 counted unchanged repository defects against the feature gate. Under the follow-up
 instructions, the gate covers newly introduced/worsened defects and inconsistent
@@ -78,7 +83,7 @@ are unchanged. Runtime GUI/WinRT ordering remains explicitly unverified.
 
 ## Baseline findings
 
-- **Blocker: 1:** [OSC start/immediate-stop crash — Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7), reproduced on dev and feature.
+- **Original Blocker: 1, now resolved:** [OSC start/immediate-stop crash — Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7), originally reproduced on dev and feature; fixed independently by `6014fa1` ([verification](issue-7-osc-lifecycle.md)).
 - **Major: 1:** [Manual connection shutdown lifetime — Issue #1](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/1), statically shared by both.
 - **Minor:** xUnit2020 warning in R06SessionTests, emitted by both baselines.
 
@@ -95,12 +100,12 @@ The separate reconnect-recovery PR/branch is not merged or modified here.
   cancellation/join is still missing during application shutdown. The common
   baseline/feature code path is confirmed statically; Windows/R06 runtime behavior
   still requires delayed-operation tests and GUI/HIL validation.
-- [Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7): OSC immediate-stop
-  NullReferenceException remains unfixed. Both compared versions reproduced 99/100
-  failures with the same logical stack trace and post-stop state. The issue includes
-  reproduction, Expected/Actual, recorded stack, probable cause and regression requirements.
-- GUI and R06 HIL remain pending. Publishing the issues does not change the previous
-  software-gate result or claim that either baseline defect has been fixed.
+- [Issue #7](https://github.com/orzkwsk/ColmiRingVRCBridge/issues/7): resolved separately
+  by `6014fa1`. Fresh baseline 99/100 crashes → fixed dev 0/100; every CTS disposed
+  and worker joined. Debug 41/41 and Release 40/40 tests PASS after integration.
+  See [OSC lifetime contract and remaining network timing limits](issue-7-osc-lifecycle.md).
+- GUI and R06 HIL remain pending for the broader application/Issue #1. They are not
+  Issue #7 acceptance prerequisites; its real UDP and deterministic lifetime tests PASS.
 
 ## Git topology
 
