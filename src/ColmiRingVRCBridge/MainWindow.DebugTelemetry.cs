@@ -167,7 +167,12 @@ public partial class MainWindow
 
     private void DebugTelemetry_ConnectionProgress(string stage)
     {
-        LogDebugTelemetryEvent("connection_progress", new { stage });
+        LogDebugTelemetryEvent("connection_progress", new
+        {
+            stage,
+            operation = _connectionOperation.ToString(),
+            pendingLateBleOperations = BoundedBleOperation.PendingCompletions
+        });
     }
 
     private void DebugTelemetry_HeartRateProtocolProbePacketObserved(HeartRateProtocolProbePacket packet)

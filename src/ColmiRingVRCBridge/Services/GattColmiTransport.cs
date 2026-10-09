@@ -6,12 +6,14 @@ namespace ColmiRingVRCBridge.Services;
 internal sealed class GattColmiTransport : IColmiTransport
 {
     private static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(3);
 
     private readonly GattCharacteristic _rxCharacteristic;
     private readonly GattCharacteristic _txCharacteristic;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private bool _started;
-    private bool _disposed;
+    private bool _notificationRequested;
+    private volatile bool _disposed;
 
     public GattColmiTransport(GattCharacteristic rxCharacteristic, GattCharacteristic txCharacteristic)
     {
@@ -34,10 +36,11 @@ internal sealed class GattColmiTransport : IColmiTransport
 
         try
         {
-            var status = await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                    GattClientCharacteristicConfigurationDescriptorValue.Notify)
-                .AsTask(cancellationToken)
-                .ConfigureAwait(false);
+            _notificationRequested = true;
+            var status = await BoundedBleOperation.AwaitAsync(
+                _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
+                    GattClientCharacteristicConfigurationDescriptorValue.Notify).AsTask(cancellationToken),
+                cancellationToken).ConfigureAwait(false);
 
             if (status != GattCommunicationStatus.Success)
             {
@@ -51,21 +54,19 @@ internal sealed class GattColmiTransport : IColmiTransport
         {
             _txCharacteristic.ValueChanged -= TxCharacteristic_ValueChanged;
 
-            if (_started)
+            if (_notificationRequested)
             {
                 try
                 {
                     using var cleanupCts = new CancellationTokenSource(CleanupTimeout);
-                    await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                            GattClientCharacteristicConfigurationDescriptorValue.None)
-                        .AsTask(cleanupCts.Token)
-                        .ConfigureAwait(false);
+                    await DisableNotificationsAsync(cleanupCts.Token).ConfigureAwait(false);
                 }
                 catch
                 {
                 }
 
                 _started = false;
+                _notificationRequested = false;
             }
 
             throw;
@@ -80,17 +81,18 @@ internal sealed class GattColmiTransport : IColmiTransport
             throw new InvalidOperationException("BLE transport is not started.");
         }
 
-        await _writeLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        writeCts.CancelAfter(WriteTimeout);
+        var token = writeCts.Token;
+        await _writeLock.WaitAsync(token).ConfigureAwait(false);
         try
         {
+            ThrowIfDisposed();
             using var writer = new DataWriter();
             writer.WriteBytes(packet);
-            var status = await _rxCharacteristic.WriteValueAsync(
-                    writer.DetachBuffer(),
-                    GattWriteOption.WriteWithoutResponse)
-                .AsTask(cancellationToken)
-                .ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
+            var status = await BoundedBleOperation.AwaitAsync(
+                _rxCharacteristic.WriteValueAsync(writer.DetachBuffer(), GattWriteOption.WriteWithoutResponse)
+                    .AsTask(token), token).ConfigureAwait(false);
 
             if (status != GattCommunicationStatus.Success)
             {
@@ -105,6 +107,7 @@ internal sealed class GattColmiTransport : IColmiTransport
 
     private void TxCharacteristic_ValueChanged(GattCharacteristic sender, GattValueChangedEventArgs args)
     {
+        if (_disposed) return;
         using var reader = DataReader.FromBuffer(args.CharacteristicValue);
         var data = new byte[(int)reader.UnconsumedBufferLength];
         reader.ReadBytes(data);
@@ -129,22 +132,28 @@ internal sealed class GattColmiTransport : IColmiTransport
         _disposed = true;
         _txCharacteristic.ValueChanged -= TxCharacteristic_ValueChanged;
 
-        if (_started)
+        await _writeLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            try
+            if (_notificationRequested)
             {
-                using var cleanupCts = new CancellationTokenSource(CleanupTimeout);
-                await _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
-                        GattClientCharacteristicConfigurationDescriptorValue.None)
-                    .AsTask(cleanupCts.Token)
-                    .ConfigureAwait(false);
-            }
-            catch
-            {
+                try
+                {
+                    using var cleanupCts = new CancellationTokenSource(CleanupTimeout);
+                    await DisableNotificationsAsync(cleanupCts.Token).ConfigureAwait(false);
+                }
+                catch { }
             }
         }
+        finally { _writeLock.Release(); }
 
         _started = false;
-        _writeLock.Dispose();
+        _notificationRequested = false;
+        // Do not dispose a semaphore while previously accepted writers may still
+        // be unwinding. It owns no native WaitHandle; waiting writers recheck disposed.
     }
+
+    private Task DisableNotificationsAsync(CancellationToken token) => BoundedBleOperation.AwaitAsync(
+        _txCharacteristic.WriteClientCharacteristicConfigurationDescriptorAsync(
+            GattClientCharacteristicConfigurationDescriptorValue.None).AsTask(token), token);
 }

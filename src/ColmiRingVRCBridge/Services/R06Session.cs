@@ -392,7 +392,8 @@ internal sealed class R06Session : IAsyncDisposable
             {
                 try
                 {
-                    await StopHeartRateSessionAsync().ConfigureAwait(false);
+                    using var cleanupCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                    await StopHeartRateSessionAsync(cleanupCts.Token).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
