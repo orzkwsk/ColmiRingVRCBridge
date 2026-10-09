@@ -108,7 +108,7 @@ serial and heart-rate values are excluded from this report.
 | AutoReconnect → Manual Connect | PASS for priority/recovery. Auto device-info read pending; 00:02:48.621 cancel completed, 00:02:48.625 manual device open began. Manual device-info reached the 15-second deadline at 00:03:03.637; Auto later restored the session at 00:03:10.307 |
 | Manual Disconnect with Auto ON | PASS. 23:55:45.491 cleanup completed; checkbox remained ON, no auto attempt for over 50 seconds, and Connect/Scan were enabled. Only explicit OFF→ON resumed retries |
 | Native link loss / Auto recovery | Observed. Published session lost its link before Auto cleanup at 00:03:23; subsequent attempts stayed manually preemptible and session/telemetry recovered at 00:05:41.726. Controlled physical trigger confirmation remains pending |
-| Experimental Reboot | GATT write returned successfully at 00:07:00; local cleanup 00:07:00.817–.844, then normal Auto attempts from 00:07:01.859. Actual firmware restart/device reappearance/session recovery still pending |
+| Experimental Reboot | GATT write returned successfully at 00:07:00; local cleanup 00:07:00.817–.844, then normal Auto attempts from 00:07:01.859. No ready session initially; after the user woke R06 again, Auto restored the session at 00:10:27.742 and battery notifications resumed. Actual firmware restart remains unconfirmed |
 | Application Close | Normal asynchronous exit and final `logger_stopping` observed on the first GUI run. Close landed after Scan completion, so this is not claimed as a close-during-Scan HIL pass |
 
 At the manual device-info deadline, one native completion was temporarily pending;
@@ -128,6 +128,11 @@ polling lifetime, logger drain, persisted formats and OSC lifetime fix are retai
 The user cannot perform a distance-induced disconnect, so the controlled physical
 loss test is NOT TESTED. Naturally occurring native link loss/recovery is recorded
 above; it is not relabeled as that controlled test.
+
+After Reboot/wake, the connected ring also reported realtime HR error code 2;
+the UI remained Connected/HR init. Session creation and battery notification
+recovery are confirmed, but sustained post-Reboot heart-rate recovery is not
+claimed. Initial normal connection did deliver live heart-rate samples.
 
 Remaining hardware notes: controlled physical loss/recovery and the complete
 Reboot outcome must be recorded before marking PR ready, merging dev or closing
