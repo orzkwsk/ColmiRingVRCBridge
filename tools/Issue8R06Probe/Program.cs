@@ -14,7 +14,7 @@ if (settings.RootElement.GetProperty("DeviceName").GetString()?.StartsWith("R06_
     throw new InvalidOperationException("Research target must be the existing R06 device; other models are rejected.");
 var address = settings.RootElement.GetProperty("BluetoothAddress").GetUInt64();
 using var capture = new Capture(options.Output, options.Label);
-capture.Event("manual_intervention", note: options.Intervention);
+capture.Event(options.Mode == "passive" ? "intervention_requested" : "manual_intervention", note: options.Intervention);
 await using var probe = new Probe(address, capture);
 await probe.ScanAsync(10);
 if (options.Mode == "passive") { await probe.ObserveAsync(options.Duration); return; }
@@ -83,6 +83,8 @@ sealed record Options(string Mode, string Sequence, string Label, string Interve
 
 static class Presets
 {
+    // Windows uses -127 with the last cached packet for its out-of-range event.
+    public static bool IsRadioAdvertisement(short rssi) => rssi != -127;
     public static byte[] Packet(byte command, params byte[] payload)
     {
         var p = new byte[16]; p[0] = command; payload.CopyTo(p, 1);
@@ -125,7 +127,8 @@ static class Presets
         Denied(() => Options.Parse(["--mode", "observe08", "--runs", "2", "--enable-command08"]));
         Denied(() => Options.Parse(["--packet", "FF6666"]));
         if (Packet(0x69, 6, 1)[15] != 0x70 || Packet(0x69, 6, 3)[15] != 0x72 || Packet(0x1E, 0x33)[15] != 0x51 || Stop(6, "6A")[15] != 0x70) throw new Exception("Checksum failed.");
-        Console.WriteLine("Probe self-test PASS: default deny, 0x08 opt-in, checksums.");
+        if (IsRadioAdvertisement(-127) || !IsRadioAdvertisement(-126) || !IsRadioAdvertisement(-60)) throw new Exception("Advertisement sentinel classification failed.");
+        Console.WriteLine("Probe self-test PASS: default deny, 0x08 opt-in, checksums, Windows out-of-range sentinel.");
     }
 }
 
@@ -202,6 +205,11 @@ sealed class Probe(ulong address, Capture log) : IAsyncDisposable
     void Advertisement(BluetoothLEAdvertisementWatcher sender, BluetoothLEAdvertisementReceivedEventArgs args)
     {
         if (args.BluetoothAddress != address) return;
+        if (!Presets.IsRadioAdvertisement(args.RawSignalStrengthInDBm))
+        {
+            log.Event("advertisement_out_of_range", note: $"RSSI=-127; native_timestamp={args.Timestamp:O}; cached last advertisement; not radio return evidence");
+            return;
+        }
         Interlocked.Increment(ref ads); Interlocked.Exchange(ref lastAdTicks, Stopwatch.GetTimestamp());
         log.Event("advertisement_seen", note: $"RSSI={args.RawSignalStrengthInDBm}; native_timestamp={args.Timestamp:O}; kind={args.AdvertisementType}");
     }

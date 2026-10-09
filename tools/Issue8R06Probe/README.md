@@ -14,6 +14,7 @@ Raw JSONL goes only to ignored `artifacts/issue8/`. It can contain personal HR v
 - Target comes from the user's existing connection.json. Probe does not modify it.
 - Capture logs UTC ISO timestamp, relative milliseconds, event, direction, packet, command, connection/measurement states, label and intervention.
 - Native disconnect is logged separately from local cleanup. Advertisements are target-filtered; absence at the Windows watcher is not proof of absence on air.
+- Windows RSSI `-127` is an out-of-range notification using a cached packet, logged separately and excluded from radio advertisement/reconnect evidence. Analyze.ps1 applies this exclusion to historical captures too.
 
 | Sequence | TX behavior | Controlled comparison |
 | --- | --- | --- |
@@ -31,11 +32,14 @@ From the repository root with .NET 8 SDK (this workspace pins it through `artifa
 
 ```powershell
 dotnet run --project tools/Issue8R06Probe -- --mode self-test
+./tools/Issue8R06Probe/Test-Analyze.ps1
 dotnet run --project tools/Issue8R06Probe -- --mode capture --sequence S0 --label worn --duration 45 --output artifacts/issue8/captures/example.jsonl
 dotnet run --project tools/Issue8R06Probe -- --mode passive --duration 30 --intervention charger-attach --output artifacts/issue8/captures/wake-example.jsonl
 ```
 
 Record a physical intervention **only after the user actually reports performing it**. `none` is the default; do not silently label charger/motion/cold boot.
+
+Passive mode records `intervention_requested` before observation, not a claim that the action has happened. Record the user's confirmation separately in the private session timeline. Confirmation receipt time is not precise physical-action onset. In the first motion capture the older event name `manual_intervention` denotes planned context; its completion is established by the separate user confirmation.
 
 ## Quiet command08 observation
 

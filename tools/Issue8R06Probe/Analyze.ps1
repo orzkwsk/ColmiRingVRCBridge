@@ -1,6 +1,8 @@
 param([Parameter(Mandatory)][string]$InputPath)
 $ErrorActionPreference='Stop'
 $events=Get-Content -LiteralPath $InputPath | ForEach-Object { $_ | ConvertFrom-Json }
+$radioAds=@($events | Where-Object {$_.event -eq 'advertisement_seen' -and $_.note -notmatch 'RSSI=-127(?:;|$)'})
+$outOfRange=@($events | Where-Object {$_.event -eq 'advertisement_out_of_range' -or ($_.event -eq 'advertisement_seen' -and $_.note -match 'RSSI=-127(?:;|$)')})
 # Print aggregate facts only. Raw values, serial/address, and checksums never leave input.
 $trials=@($events | Where-Object event -eq 'trial_start')
 $results=for($i=0;$i -lt $trials.Count;$i++) {
@@ -25,10 +27,11 @@ $results=for($i=0;$i -lt $trials.Count;$i++) {
 $command=$events | Where-Object {$_.event -eq 'TX' -and $_.command -eq '0x08'} | Select-Object -First 1
 $commandResult=if($command){
     $native=$events|Where-Object {$_.event -eq 'native_disconnect' -and $_.relative_ms -ge $command.relative_ms}|Select-Object -First 1
-    $ads=@($events|Where-Object {$_.event -eq 'advertisement_seen' -and $_.relative_ms -ge $command.relative_ms})
+    $ads=@($radioAds|Where-Object {$_.relative_ms -ge $command.relative_ms})
     [ordered]@{tx='08 01 00 00 00 00 00 00 00 00 00 00 00 00 00 09';
         native_disconnect_after_tx_ms=if($native){[math]::Round($native.relative_ms-$command.relative_ms,1)}else{$null};
         post_command_advertisements=$ads.Count;
+        post_command_out_of_range_notifications=@($outOfRange|Where-Object {$_.relative_ms -ge $command.relative_ms}).Count;
         first_post_command_ad_ms=if($ads.Count){[math]::Round($ads[0].relative_ms-$command.relative_ms,1)}else{$null};
         native_disconnect_events=@($events|Where-Object event -eq 'native_disconnect').Count;
         reconnect_events=@($events|Where-Object event -eq 'reconnect').Count;
@@ -39,4 +42,5 @@ $commandResult=if($command){
 }else{$null}
 [ordered]@{capture=Split-Path $InputPath -Leaf;trials=@($results);command08=$commandResult;
     interventions=@($events|Where-Object event -eq 'manual_intervention'|ForEach-Object note);
-    target_advertisements=@($events|Where-Object event -eq 'advertisement_seen').Count} | ConvertTo-Json -Depth 8
+    requested_interventions=@($events|Where-Object event -eq 'intervention_requested'|ForEach-Object note);
+    target_advertisements=$radioAds.Count;out_of_range_notifications=$outOfRange.Count} | ConvertTo-Json -Depth 8

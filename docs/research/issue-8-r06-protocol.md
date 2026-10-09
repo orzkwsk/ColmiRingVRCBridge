@@ -63,4 +63,16 @@ Non-worn capture: `unworn-s0.jsonl`. User-confirmed removal is recorded explicit
 
 ## Current decision
 
-Command08: **INCONCLUSIVE** pending this investigation's quiet 180 s trial. Status byte 02: **UNKNOWN** pending wear/wake comparison. Issue #8 remains OPEN. Production Reboot functionality is not reinstated.
+Command08: **INCONCLUSIVE** pending a corrected quiet trial and separate wake observations. Status byte 02: exact meaning **UNKNOWN**; association with non-worn/no-valid-HR observed in 3/3 trials. Issue #8 remains OPEN. Production Reboot functionality is not reinstated.
+
+## Command08 trial 1 and watcher correction
+
+Private capture: `command08-quiet-1.jsonl`. Before TX: 35 valid HR samples over 33.676 s, status 00 × 37, battery received. A single `08 01 ... 09` write completed. Native disconnect followed TX by **667.1 ms**. At 10/30/60/180 s the device was disconnected. There were **zero actual target advertisements**, zero RX and zero further UART TX during the 180 s period.
+
+One Windows watcher event at +12.523 s carried RSSI=-127. [Microsoft's API remarks](https://learn.microsoft.com/en-us/uwp/api/windows.devices.bluetooth.advertisement.bluetoothleadvertisementreceivedeventargs) identify this as an out-of-range notification with the last cached advertisement, not renewed advertising. The original probe incorrectly counted it and attempted GATT reconnection once; that attempt failed. Thus this run cannot be called strictly passive, despite zero subsequent UART commands. Original raw evidence is unchanged. Historical analysis now excludes this sentinel; corrected probe logs `advertisement_out_of_range` and cannot reconnect from it. Boundary text in the old trace retains the old counter and must not be interpreted as actual advertisement counts.
+
+Absence at the Windows watcher is not HCI-level proof of radio silence. Power-off/deep sleep remains a hypothesis; no autonomous reboot has been established. Main/dev and released production code are unchanged.
+
+## Wake observation 1: motion only
+
+After trial 1, a separate passive capture (`wake-motion-1.jsonl`) recorded 10 s scan + 60 s observation. User confirmed light hand movements while still wearing the ring, without charger use. Zero target advertisements were recorded; no GATT connection or UART writes were made. Exact action-onset time is unknown, so no precise wake latency is claimed. The original initial `manual_intervention` event denotes requested context; a separate private user-confirmation timeline establishes completion. New passive captures use `intervention_requested` to prevent this ambiguity.
