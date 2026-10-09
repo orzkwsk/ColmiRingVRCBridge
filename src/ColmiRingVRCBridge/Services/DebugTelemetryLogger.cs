@@ -24,8 +24,9 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
     private Task? _snapshotTask;
     private Task? _writerTask;
     private bool _started;
+    private bool _disposed;
 
-    public DebugTelemetryLogger(Func<object> snapshotFactory, TimeSpan snapshotInterval)
+    public DebugTelemetryLogger(Func<object> snapshotFactory, TimeSpan snapshotInterval, string? logDirectory = null)
     {
         _snapshotFactory = snapshotFactory ?? throw new ArgumentNullException(nameof(snapshotFactory));
         if (snapshotInterval <= TimeSpan.Zero)
@@ -35,7 +36,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
 
         _snapshotInterval = snapshotInterval;
 
-        var directory = Path.Combine(
+        var directory = logDirectory ?? Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "ColmiRingVRCBridge",
             "debug-logs");
@@ -51,6 +52,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
 
     public void Start()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_started)
         {
             return;
@@ -58,8 +60,9 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
 
         _started = true;
         _cts = new CancellationTokenSource();
+        var snapshotToken = _cts.Token;
         _writerTask = Task.Run(WriterLoopAsync);
-        _snapshotTask = Task.Run(() => SnapshotLoopAsync(_cts.Token));
+        _snapshotTask = Task.Run(() => SnapshotLoopAsync(snapshotToken));
 
         LogEvent("logger_started", new
         {
@@ -135,6 +138,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
         }
         catch (Exception ex)
         {
+            _channel.Writer.TryComplete(ex);
             Debug.WriteLine($"Debug telemetry logger stopped: {ex}");
         }
     }
@@ -167,6 +171,7 @@ internal sealed class DebugTelemetryLogger : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        _disposed = true;
         if (!_started)
         {
             return;

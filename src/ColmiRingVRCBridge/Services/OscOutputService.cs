@@ -14,6 +14,8 @@ internal sealed class OscOutputService : IAsyncDisposable
 
     public void Start(OscOutputOptions options, Func<int?> bpmProvider)
     {
+        // A record copy/object initializer can change the constructor-validated pair.
+        options.Validate();
         if (_cts is not null)
         {
             throw new InvalidOperationException("OSC output is already running.");

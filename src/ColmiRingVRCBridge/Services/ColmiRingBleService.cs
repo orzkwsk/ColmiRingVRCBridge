@@ -138,18 +138,18 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         await DisconnectAsync().ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
 
-        _device = await BluetoothLEDevice.FromBluetoothAddressAsync(candidate.BluetoothAddress);
-        cancellationToken.ThrowIfCancellationRequested();
-
-        if (_device is null)
-        {
-            throw new InvalidOperationException("Windows could not open the selected BLE device.");
-        }
-
-        _device.ConnectionStatusChanged += Device_ConnectionStatusChanged;
-
         try
         {
+            _device = await BluetoothLEDevice.FromBluetoothAddressAsync(candidate.BluetoothAddress);
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (_device is null)
+            {
+                throw new InvalidOperationException("Windows could not open the selected BLE device.");
+            }
+
+            _device.ConnectionStatusChanged += Device_ConnectionStatusChanged;
+
             var services = await _device.GetGattServicesForUuidAsync(UartServiceUuid, BluetoothCacheMode.Uncached);
             cancellationToken.ThrowIfCancellationRequested();
             if (services.Status != GattCommunicationStatus.Success || services.Services.Count == 0)
@@ -191,23 +191,28 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
     {
         var session = _session;
         _session = null;
-        if (session is not null)
+        try
         {
-            UnhookSession(session);
-            await session.DisposeAsync().ConfigureAwait(false);
+            if (session is not null)
+            {
+                UnhookSession(session);
+                await session.DisposeAsync().ConfigureAwait(false);
+            }
         }
-
-        if (_device is not null)
+        finally
         {
-            _device.ConnectionStatusChanged -= Device_ConnectionStatusChanged;
+            if (_device is not null)
+            {
+                _device.ConnectionStatusChanged -= Device_ConnectionStatusChanged;
+            }
+
+            _uartService?.Dispose();
+            _uartService = null;
+            _device?.Dispose();
+            _device = null;
+
+            ConnectionChanged?.Invoke(false);
         }
-
-        _uartService?.Dispose();
-        _uartService = null;
-        _device?.Dispose();
-        _device = null;
-
-        ConnectionChanged?.Invoke(false);
     }
 
     private void HookSession(R06Session session)

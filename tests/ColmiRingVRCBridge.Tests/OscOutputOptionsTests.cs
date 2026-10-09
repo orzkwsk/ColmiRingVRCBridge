@@ -1,9 +1,40 @@
 using ColmiRingVRCBridge.Models;
+using ColmiRingVRCBridge.Services;
 
 namespace ColmiRingVRCBridge.Tests;
 
 public sealed class OscOutputOptionsTests
 {
+    [Fact]
+    public void PositionalRecordApiSupportsNamedArgumentsDeconstructionAndCopy()
+    {
+        var options = new OscOutputOptions(
+            Host: "127.0.0.1", Port: 9000, ParameterName: "HeartRate",
+            ValueType: OscValueType.Float, Scaling: ScalingMode.Normalize255,
+            Interval: TimeSpan.FromSeconds(3));
+        var (host, port, parameter, type, scaling, interval) = options;
+        Assert.Equal(("127.0.0.1", 9000, "HeartRate", OscValueType.Float,
+            ScalingMode.Normalize255, TimeSpan.FromSeconds(3)),
+            (host, port, parameter, type, scaling, interval));
+
+        // Both property orders retain valid copy behavior.
+        var copy = options with { ValueType = OscValueType.Int, Scaling = ScalingMode.RawBpm };
+        copy.Validate();
+        (options with { Scaling = ScalingMode.RawBpm, ValueType = OscValueType.Int }).Validate();
+        Assert.Equal(ScalingMode.Normalize255, options.Scaling);
+        Assert.Equal(ScalingMode.RawBpm, copy.Scaling);
+    }
+
+    [Fact]
+    public async Task InvalidRecordCopyIsRejectedBeforeOutputStarts()
+    {
+        var options = new OscOutputOptions("127.0.0.1", 9000, "HeartRate",
+            OscValueType.Float, ScalingMode.Normalize255, TimeSpan.FromSeconds(3));
+        await using var output = new OscOutputService();
+        Assert.Throws<ArgumentException>(() => output.Start(options with { ValueType = OscValueType.Int }, () => 72));
+        Assert.False(output.IsRunning);
+    }
+
     [Fact]
     public void Constructor_RejectsIntegerNormalization()
     {

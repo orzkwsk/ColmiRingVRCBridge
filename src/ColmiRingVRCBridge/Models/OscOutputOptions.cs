@@ -12,35 +12,28 @@ public enum ScalingMode
     RawBpm
 }
 
-public sealed record OscOutputOptions
+public sealed record OscOutputOptions(
+    string Host,
+    int Port,
+    string ParameterName,
+    OscValueType ValueType,
+    ScalingMode Scaling,
+    TimeSpan Interval)
 {
-    public OscOutputOptions(
-        string host,
-        int port,
-        string parameterName,
-        OscValueType valueType,
-        ScalingMode scaling,
-        TimeSpan interval)
+    // Retain the positional-record API (named arguments, deconstruction and with).
+    public OscValueType ValueType { get; init; } = ValidateValueType(ValueType, Scaling);
+
+    internal void Validate() => ValidateValueType(ValueType, Scaling);
+
+    private static OscValueType ValidateValueType(OscValueType valueType, ScalingMode scaling)
     {
         if (valueType == OscValueType.Int && scaling == ScalingMode.Normalize255)
         {
             throw new ArgumentException("Integer OSC output must use raw BPM scaling.", nameof(scaling));
         }
 
-        Host = host;
-        Port = port;
-        ParameterName = parameterName;
-        ValueType = valueType;
-        Scaling = scaling;
-        Interval = interval;
+        return valueType;
     }
-
-    public string Host { get; }
-    public int Port { get; }
-    public string ParameterName { get; }
-    public OscValueType ValueType { get; }
-    public ScalingMode Scaling { get; }
-    public TimeSpan Interval { get; }
 
     public string OscAddress
     {

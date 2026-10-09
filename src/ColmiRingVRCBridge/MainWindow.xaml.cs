@@ -471,6 +471,7 @@ public partial class MainWindow : Window
     {
         if (_closing)
         {
+            e.Cancel = true;
             return;
         }
 
@@ -480,9 +481,31 @@ public partial class MainWindow : Window
 
         try
         {
-            await ShutdownReconnectAsync();
-            await _oscOutputService.DisposeAsync();
-            await _ringService.DisposeAsync();
+            try
+            {
+                await ShutdownReconnectAsync();
+            }
+            finally
+            {
+                try
+                {
+                    await _oscOutputService.DisposeAsync();
+                }
+                finally
+                {
+                    try
+                    {
+                        await _ringService.DisposeAsync();
+                    }
+                    finally
+                    {
+                        await BatteryHistoryPersistenceQueue.FlushAsync();
+#if DEBUG
+                        await ShutdownDebugTelemetryLoggingAsync();
+#endif
+                    }
+                }
+            }
         }
         finally
         {
