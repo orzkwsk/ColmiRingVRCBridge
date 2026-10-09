@@ -152,5 +152,21 @@ separate. GUI and HIL are pending and not reported as PASS.
 
 ## Integration status
 
-Pending execution of the approved normal merge and post-merge checks. The final
-Git state and push result will be recorded after those operations succeed.
+Normal merge completed on local tracking dev at
+`360f6d8e2d4caa34016ebc2163d260b75c422290` (parents: fetched dev `49fe23b`
+and feature `3f7a225`). No conflict. The merged tree exactly matches the inspected
+simulation, and dev README/version/license/CI/release files are unchanged.
+
+Post-merge .NET 8.0.424 checks on dev:
+
+- Release build: PASS (0 errors; existing xUnit2020 warning).
+- Release tests: 29/29 PASS.
+- Debug build: PASS (0 errors; same baseline warning).
+- Debug tests: 30/30 PASS.
+- Regression, failure-path and serialization cases: PASS as included above.
+- GUI / HIL: NOT TESTED.
+
+The final follow-up commit only records these results; no source/test change
+follows the verified merge. Normal `git push origin dev` is the next operation.
+The final HEAD, push outcome and local/remote equality are reported in chat;
+no assertion of push success is made before that operation returns successfully.
