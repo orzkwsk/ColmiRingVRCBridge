@@ -6,8 +6,7 @@ internal enum ConnectionOperation
     AutoReconnect,
     ManualScan,
     ManualConnect,
-    ManualDisconnect,
-    ManualReboot
+    ManualDisconnect
 }
 
 // Owns accepted operations (including operations waiting for preempted work).
@@ -80,7 +79,7 @@ internal sealed class ConnectionOperationCoordinator
 
     private static int Priority(ConnectionOperation kind) => kind switch
     {
-        ConnectionOperation.ManualDisconnect or ConnectionOperation.ManualReboot => 3,
+        ConnectionOperation.ManualDisconnect => 3,
         ConnectionOperation.ManualScan or ConnectionOperation.ManualConnect => 2,
         ConnectionOperation.AutoReconnect => 1,
         _ => 0

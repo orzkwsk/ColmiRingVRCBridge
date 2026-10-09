@@ -19,5 +19,4 @@ internal interface IBleConnection : IAsyncDisposable
     Task<RingDeviceInfo> ReadDeviceInfoAsync(CancellationToken token);
     Task EnableNotificationsAsync(CancellationToken token);
     Task StartSessionAsync(CancellationToken token);
-    Task RebootAsync(CancellationToken token);
 }

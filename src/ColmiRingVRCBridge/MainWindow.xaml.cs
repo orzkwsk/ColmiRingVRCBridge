@@ -119,28 +119,6 @@ public partial class MainWindow : Window
         }, () => operation == ConnectionOperation.ManualConnect);
     }
 
-    private async void RebootButton_Click(object sender, RoutedEventArgs e)
-    {
-        await RunManualOperationAsync(ConnectionOperation.ManualReboot, async token =>
-        {
-            SetStatus("Sending experimental ring reboot command (0x08/0x01)...");
-            try
-            {
-                await _ringService.RebootAsync(token);
-                await Task.Delay(TimeSpan.FromMilliseconds(300), token);
-            }
-            finally
-            {
-                // Even a failed/cancelled experimental command cannot retain a stale local session.
-                await _ringService.DisconnectAsync();
-            }
-            token.ThrowIfCancellationRequested();
-            if (_closing) return;
-            ClearDeviceDetails();
-            SetStatus("Ring reboot command sent. Waiting for auto reconnect...");
-        }, () => true);
-    }
-
     private async Task RunManualOperationAsync(ConnectionOperation kind, Func<CancellationToken, Task> body,
         Func<bool> resumeReconnect)
     {

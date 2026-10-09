@@ -89,8 +89,7 @@ public partial class MainWindow
                 "hr_protocol_probe_v1",
                 "battery_freshness_v1",
                 "telemetry_liveness_v1",
-                "ble_connect_stage_v1",
-                "ring_reboot_v1"
+                "ble_connect_stage_v1"
             }
         };
     }

@@ -115,7 +115,6 @@ internal sealed class WinRtBleConnection : IBleConnection
         token.ThrowIfCancellationRequested();
     }
 
-    public Task RebootAsync(CancellationToken token) => _session!.RebootAsync(token);
     private void SessionHeartRate(int bpm) => HeartRateUpdated?.Invoke(this, bpm);
     private void SessionBattery(BatteryState battery) => BatteryUpdated?.Invoke(this, battery);
     private void SessionWarning(string warning) => ProtocolWarning?.Invoke(this, warning);

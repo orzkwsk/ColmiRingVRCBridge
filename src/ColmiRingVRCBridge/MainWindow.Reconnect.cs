@@ -189,15 +189,13 @@ public partial class MainWindow
         var manualBusy = _connectionOperation is
             ConnectionOperation.ManualScan or
             ConnectionOperation.ManualConnect or
-            ConnectionOperation.ManualDisconnect or
-            ConnectionOperation.ManualReboot;
+            ConnectionOperation.ManualDisconnect;
 
         // Manual actions are allowed to preempt an AutoReconnect attempt.
         // The click handlers first suppress/cancel the background reconnect loop.
         ConnectButton.IsEnabled = !_closing && !manualBusy;
         RingComboBox.IsEnabled = !_closing && !linkConnected && !manualBusy;
         ScanButton.IsEnabled = !_closing && !linkConnected && !manualBusy;
-        RebootButton.IsEnabled = !_closing && linkConnected && !manualBusy;
     }
 
     private void EnsureReconnectLoop()

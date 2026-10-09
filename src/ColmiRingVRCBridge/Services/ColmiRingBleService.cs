@@ -250,22 +250,6 @@ internal sealed class ColmiRingBleService : IAsyncDisposable
         ConnectionChanged?.Invoke(false);
     }
 
-    public async Task RebootAsync(CancellationToken cancellationToken = default)
-    {
-        using var linked = CancellationTokenSource.CreateLinkedTokenSource(_shutdownToken, cancellationToken);
-        linked.CancelAfter(TimeSpan.FromSeconds(5));
-        await _commands.WaitAsync(linked.Token).ConfigureAwait(false);
-        try
-        {
-            ThrowIfDisposed();
-            var connection = _connection;
-            if (connection?.IsConnected != true) throw new InvalidOperationException("Ring is not connected.");
-            ReportConnectionProgress("ring_reboot_command");
-            await connection.RebootAsync(linked.Token).ConfigureAwait(false);
-        }
-        finally { _commands.Release(); }
-    }
-
     private void Hook(IBleConnection connection)
     {
         connection.HeartRateUpdated += ForwardHeartRate;

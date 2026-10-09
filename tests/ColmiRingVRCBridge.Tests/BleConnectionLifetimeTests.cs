@@ -198,28 +198,6 @@ public sealed class BleConnectionLifetimeTests
     }
 
     [Fact]
-    public async Task RebootDuringShutdown_IsCancelled_ThenLocalConnectionIsDisposed()
-    {
-        var connection = new FakeConnection(6);
-        await using var service = new ColmiRingBleService(() => connection, TimeSpan.FromSeconds(15));
-        await service.ConnectAsync(Candidate);
-        var coordinator = new ConnectionOperationCoordinator();
-        var reboot = coordinator.RunAsync(ConnectionOperation.ManualReboot, async token =>
-        {
-            try { await service.RebootAsync(token); }
-            finally { await service.DisconnectAsync(); }
-        });
-        await connection.Entered.Task.WaitAsync(Timeout);
-        await coordinator.ShutdownAsync().WaitAsync(Timeout);
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reboot.WaitAsync(Timeout));
-        Assert.False(service.IsConnected);
-        Assert.Equal(1, connection.DisposeCount);
-        var late = new Resource();
-        connection.Pending.SetResult(late);
-        Assert.Equal(1, late.DisposeCount);
-    }
-
-    [Fact]
     public async Task CleanupFailure_ClearsOwnership_Unsubscribes_AndAllowsAnotherAttempt()
     {
         var first = new FakeConnection { FailDispose = true };
@@ -312,7 +290,6 @@ public sealed class BleConnectionLifetimeTests
             await Stage(5, token);
             SessionStarts++;
         }
-        public Task RebootAsync(CancellationToken token) => Stage(6, token);
         public void EmitHeartRate() => HeartRateUpdated?.Invoke(this, 72);
         public void EmitConnectionChanged(bool connected) => ConnectionChanged?.Invoke(this, connected);
         public ValueTask DisposeAsync()

@@ -11,7 +11,6 @@ public sealed class ConnectionOperationCoordinatorTests
     [InlineData((int)ConnectionOperation.ManualScan)]
     [InlineData((int)ConnectionOperation.ManualConnect)]
     [InlineData((int)ConnectionOperation.ManualDisconnect)]
-    [InlineData((int)ConnectionOperation.ManualReboot)]
     public async Task ManualAction_CancelsAutoReconnect_ThenJoinsItsCleanupBeforeStarting(int kindValue)
     {
         var kind = (ConnectionOperation)kindValue;
@@ -47,13 +46,13 @@ public sealed class ConnectionOperationCoordinatorTests
     }
 
     [Fact]
-    public async Task HigherPriorityAction_CancelsQueuedManualConnect_WithoutConcurrentBodies()
+    public async Task ManualDisconnect_CancelsQueuedManualConnect_WithoutConcurrentBodies()
     {
         var coordinator = new ConnectionOperationCoordinator();
         var cleanupEntered = Signal();
         var release = Signal();
         var connectEntered = false;
-        var rebootEntered = false;
+        var disconnectEntered = false;
         var auto = coordinator.RunAsync(ConnectionOperation.AutoReconnect, async token =>
         {
             try { await Task.Delay(System.Threading.Timeout.Infinite, token); }
@@ -64,25 +63,25 @@ public sealed class ConnectionOperationCoordinatorTests
             connectEntered = true;
             return Task.CompletedTask;
         });
-        var reboot = coordinator.RunAsync(ConnectionOperation.ManualReboot, _ =>
+        var disconnect = coordinator.RunAsync(ConnectionOperation.ManualDisconnect, _ =>
         {
-            rebootEntered = true;
+            disconnectEntered = true;
             return Task.CompletedTask;
         });
         try
         {
             await cleanupEntered.Task.WaitAsync(Timeout);
             Assert.False(connectEntered);
-            Assert.False(rebootEntered);
+            Assert.False(disconnectEntered);
             await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.RunAsync(
                 ConnectionOperation.AutoReconnect, _ => Task.CompletedTask));
         }
         finally { release.TrySetResult(); }
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => auto.WaitAsync(Timeout));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connect.WaitAsync(Timeout));
-        await reboot.WaitAsync(Timeout);
+        await disconnect.WaitAsync(Timeout);
         Assert.False(connectEntered);
-        Assert.True(rebootEntered);
+        Assert.True(disconnectEntered);
         Assert.Equal(ConnectionOperation.None, coordinator.CurrentOperation);
     }
 
@@ -90,7 +89,6 @@ public sealed class ConnectionOperationCoordinatorTests
     [InlineData((int)ConnectionOperation.ManualScan)]
     [InlineData((int)ConnectionOperation.ManualConnect)]
     [InlineData((int)ConnectionOperation.ManualDisconnect)]
-    [InlineData((int)ConnectionOperation.ManualReboot)]
     public async Task Shutdown_RejectsNewActions_CancelsAndJoinsAcceptedAction(int kindValue)
     {
         var kind = (ConnectionOperation)kindValue;
