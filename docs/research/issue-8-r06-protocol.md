@@ -47,7 +47,7 @@ Private captures in ignored `artifacts/issue8/captures/`; no addresses, serial o
 
 Normal baseline packet order is the on-device source of truth; other implementations are comparison material. Native disconnect events are distinguished from locally initiated cleanup. Windows watcher absence is an observation limit, not a controller/HCI-level proof of radio silence.
 
-## HIL sessions (in progress)
+## HIL baseline sessions
 
 | Session | Conditions | First valid HR after START | Samples / span | 69 byte[2] | Result |
 | --- | --- | --- | --- | --- | --- |
@@ -63,7 +63,7 @@ Non-worn capture: `unworn-s0.jsonl`. User-confirmed removal is recorded explicit
 
 ## Current decision
 
-Command08: **INCONCLUSIVE** pending a corrected quiet trial and separate wake observations. Status byte 02: exact meaning **UNKNOWN**; association with non-worn/no-valid-HR observed in 3/3 trials. Issue #8 remains OPEN. Production Reboot functionality is not reinstated.
+Command08: **POWER-OFF / SLEEP STRONGLY INDICATED** for the tested R06 and `08 01` payload. No autonomous advertising/session return in two 180 s windows; advertising returned after powered-charger placement in both episodes. The second command run had no subsequent GATT attempts. Status byte 02: exact meaning **UNKNOWN**; association with non-worn/no-valid-HR observed in 4/4 unchanged-S0 trials, including after wake. Worn post-wake HR resumed with unchanged S0. Decision: **CLOSE / NOT A REBOOT ON R06**, specifically not suitable for the requested autonomous Reboot behavior on this tested unit. Firmware-internal off vs sleep vs stalled reboot is not asserted. Production Reboot functionality is not reinstated.
 
 ## Command08 trial 1 and watcher correction
 
@@ -73,6 +73,72 @@ One Windows watcher event at +12.523 s carried RSSI=-127. [Microsoft's API remar
 
 Absence at the Windows watcher is not HCI-level proof of radio silence. Power-off/deep sleep remains a hypothesis; no autonomous reboot has been established. Main/dev and released production code are unchanged.
 
+## Command08 trial 2: corrected, quiet 180 seconds
+
+`command08-quiet-2.jsonl`. Worn S0 pre-command: 35 HR samples/33.840 s, status 00 × 37, battery, native connected and real advertisements. One `08 01 ... 09` TX; native disconnect **+297.6 ms**. Disconnected at all four boundaries. In 180 s: **zero real advertisements, zero RX/HR, zero further UART TX, zero reconnect attempts**. One RSSI=-127 notification was correctly excluded. No manual intervention or local GATT cleanup occurred during the window; cleanup followed its completion. The post-command summary retains pre-command sample counters: it is not evidence of post-command HR; the timestamp-filtered analyzer reports zero post-TX RX.
+
+This clean repetition confirms absence of autonomous return in the prescribed window; classification awaits the second separately observed wake. Firmware reboot versus internal deep-sleep state cannot be read directly through this Windows watcher.
+
 ## Wake observation 1: motion only
 
 After trial 1, a separate passive capture (`wake-motion-1.jsonl`) recorded 10 s scan + 60 s observation. User confirmed light hand movements while still wearing the ring, without charger use. Zero target advertisements were recorded; no GATT connection or UART writes were made. Exact action-onset time is unknown, so no precise wake latency is claimed. The original initial `manual_intervention` event denotes requested context; a separate private user-confirmation timeline establishes completion. New passive captures use `intervention_requested` to prevent this ambiguity.
+
+## Wake observation 2: powered charger attach
+
+Separate passive capture `wake-charger-attach-1.jsonl`, 10 s scan + 90 s observation. User confirmed taking the ring off the finger and placing it on a powered charger, remaining attached. **16 real target advertisements**, first at **01:42:19.701 JST**, no out-of-range notifications, GATT connection or UART writes. Physical action onset is unknown, so no charger-to-advertisement latency is asserted. Removal from the finger accompanied placement and is disclosed as a condition change.
+
+Advertising return following charger placement is consistent with external-wake-dependent power-off/sleep, given the preceding quiet and motion-only absence. The first command run's spurious GATT attempt and unknown precise placement time limit the causal conclusion. A clean command repeat and post-wake HR comparison remain required.
+
+## Wake observation 3: charger detach
+
+`wake-charger-detach-1.jsonl`: 10 s scan + 60 s passive observation; 19 real advertisements, zero out-of-range notifications. User confirmed charger removal and leaving the ring unworn near the PC. No GATT/UART activity. Advertising existed before removal, so this demonstrates persistence, **not** an independent detach-from-off wake trigger. Attach→detach was one episode, not two independent wake experiments.
+
+## Wake observation 4: finger removal / re-wear after clean command trial
+
+`wake-finger-wear-2.jsonl`: 10 s scan + 90 s passive observation, **zero real advertisements**, zero out-of-range events, no GATT/UART activity. User confirmed removing the ring from the finger for ~10 s and re-wearing, without charger use. This includes unavoidable motion and is a wear-contact transition, not an isolated sensor stimulus. Exact onset is unknown. Finger re-wear did not restore advertising in this observed episode; powered-charger placement will be repeated separately.
+
+## Wake observation 5: repeated powered-charger placement
+
+`wake-charger-attach-2.jsonl`: 10 s scan + 90 s passive observation. User confirmed powered-charger placement and leaving the ring attached. **10 real advertisements**, first **01:57:38.895 JST**, zero out-of-range events and no GATT/UART operations. This follows zero advertising during the clean 180 s command window and subsequent re-wear window. Physical action onset is unknown, so precise charger-to-advertisement latency is not asserted.
+
+Classification: **POWER-OFF / SLEEP STRONGLY INDICATED** for the tested unit/payload. Two episodes lacked autonomous return and resumed advertising after charger placement; only the first had a spurious failed GATT attempt. Firmware-internal sleep/off/reboot mechanics remain unobserved. Production Reboot must remain absent. Post-second-wake sequence matrix follows before final Issue decision.
+
+## Post-wake HR: unworn
+
+`post-wake-unworn-s0.jsonl`: unchanged S0, 20 s, battery received, zero valid HR, status 00 × 2 and 02 × 1. This matches all three pre-command unworn trials. Thus 02/no-valid-HR appeared in **4/4 unworn** S0 trials, including post-wake. Exact meaning remains UNKNOWN; an unavailable-measurement/wear association is supported. Worn comparison follows.
+
+## Post-wake HR: worn, three S0 trials
+
+`post-wake-worn-s0.jsonl`; user re-wore ring with no charger action. Trial 1: first HR +16.961 s, 30 samples/28.921 s, status 00 × 32, sustained=true, battery. Trial 2: +15.976 s, 31/29.761 s, 00 × 33, sustained=true, battery. Trial 3: +16.936 s, 14/12.960 s, 00 × 16, battery, then native disconnect ~36.376 s after notify enable; sustained=false at completion. No 02 occurred. **Do not report 3/3 stable**: current S0 restored valid HR in 3/3 starts, but the completion gate passed in 2/3. Link-loss cause is unknown and not attributed to command08 without evidence.
+
+The same-sequence wear/wake comparison exceeds ten trials in total; this does not mean ten trials per condition. Genuine cold battery/power cycle, controlled range loss and a fresh WPF process baseline remain unperformed.
+
+## Post-second-wake sequence matrix
+
+User confirmed charger removal and wearing near the PC; no further physical intervention during the matrix. Five independent captures, 45 s each, ordered S0 → S1 → S2 → S0 control → S4. Type, Continue and initial stop changed separately; S3 is the S0 alias, not an independent alternative. All trials received battery and only status 00; all observed HR notifications used command 69, not 1E.
+
+| Trial | Sequence | First valid HR after START | Samples / span | Status 00 count | Completion gate |
+| --- | --- | --- | --- | --- | --- |
+| 1 | S0 production UART | 17.068 s | 30 / 28.681 s | 32 | Sustained |
+| 2 | S1 omit action-3 Continue | 17.966 s | 28 / 26.881 s | 29 | Sustained |
+| 3 | S2 S1 with type 1 | 25.332 s | 10 / 4.440 s | 11 | Not sustained; still connected |
+| 4 | S0 control restored | 18.102 s | 29 / 27.721 s | 31 | Sustained |
+| 5 | S4 stop then S0 | 20.842 s | 26 / 24.961 s | 28 | Sustained |
+
+Private files `sequence-1-s0.jsonl` through `sequence-5-s4.jsonl`. S2 is the explicitly described R02-compatible Start + polling family, not full external-client emulation. It produced a short burst; ordinary-measurement behavior is plausible but not established from a single trial. S1 success is not evidence to remove production Continue. Current S0 remains the post-wake successful sequence. Delay sweep and alternate stop encoding were not pursued: packet comparison already established S0 recovery, and the observed link loss is not evidence for a timing fix.
+
+Total **18 HR start trials**: 15 strict S0 (11 worn, 4 unworn) + S1/S2/S4 once each. Worn S0 restored valid HR in 11/11, with sustained-at-completion in 10/11; the one native link loss is recorded above. Unworn S0 yielded no valid HR and status 02 in 4/4. These are aggregate session counts, not ten repetitions per condition or a long-term reliability claim.
+
+## Decision and remaining limits
+
+**CLOSE / NOT A REBOOT ON R06** means unsuitable for autonomous reboot on this tested unit/payload: repeated no-return windows, charger-dependent advertising return and unchanged-S0 HR recovery are sufficient for that product decision. It does not identify internal firmware power state or generalize to every R06 firmware, another model or the different zero-payload `08` command. Future power-off/reboot feature work requires a separate specification and reviewed branch; none is implemented here.
+
+Wake matrix: idle 180 s × 2 no return; motion-only one episode no return; remove/re-wear one clean episode no return; powered-charger attach two episodes returned advertisements; detach preserved advertising in episode 1; attach→detach then wearing restored HR in both episodes. Independent detach-from-off and every wake trigger were not isolated under matched conditions. Physical-action onset times are unknown. No HCI sniffer/firmware reset reason, true battery cycle, controlled range loss or new WPF-process HIL baseline was obtained. These limits remain explicit rather than being labeled cold boot or proof of radio silence.
+
+The original first-trial sentinel mistake and spurious failed GATT attempt are retained in the evidence. Corrected second trial had zero attempts and excludes that limitation. Exact byte[2]=02 semantics remain UNKNOWN; an unavailable-measurement/wear association is STRONGLY INDICATED. A separate post-wake S0 native disconnect prevents claiming universal stability.
+
+## Probe verification and isolation
+
+Debug/Release research-probe builds: PASS, zero warnings/errors. Both configurations' self-tests: PASS (deny-default command policy, command08 explicit opt-in, checksum, RSSI=-127 exclusion). `Test-Analyze.ps1`: PASS for historical/new out-of-range events, actual advertisement latency and requested-vs-completed action distinction. `git diff --check`: PASS.
+
+Only `tools/Issue8R06Probe/` and this document differ from stable baseline. Probe has no production solution or release-workflow reference. Production builds/tests were not rerun for the research-only changes; the released baseline is unchanged. Raw captures remain ignored and private. This is not approval to merge or restore production Reboot.
