@@ -87,19 +87,73 @@ The manual-control follow-up stayed Connected with fresh HR through **12:49:46.5
 - Re-wear confirmed **12:52:48.525**. The last observation at **12:53:54.693**, **66.168 seconds** after confirmation, still showed Connected / HR stale with Last HR unchanged.
 - The user then requested a pause and said they would remove the ring. **INTERRUPTED**, not a complete 180-second no-recovery result. No manual recovery control was run for this trial; physical removal at pause was not timed. The existing Release app was left running, with no further HIL input.
 
-Trial 3 was not run before the pause. Only trial 1 is a completed wear cycle. One reproduced condition and a successful manual control do not authorize implementation or establish an automatic retry policy.
+Trial 3 was not run before the pause. The pause checkpoint contained one completed wear cycle; the interrupted trial 2 remains excluded from every complete-trial count.
+
+### Resume preparation and Trial 3
+
+At resume the same production Release process was still running (PID 72888, process start **2026-10-10 02:15:27.124 JST**). Version and executable/DLL hashes still matched the identity above. Auto reconnect and Dummy BPM remained OFF; no app restart was performed. The pause gap and preparation are not additional trials.
+
+The user confirmed worn/off-charger/near-PC at **13:43:30.261**. The app remained Connected / HR stale. Preparation Manual Disconnect was requested **13:43:44.396**, then Connect **13:43:52.348**. Fresh HR, Connected and battery were observed at **13:44:30.066** (first-HR observed upper bound **37.718 seconds**). Normal reception continued through **13:45:50.854**, **80.788 seconds** after the first fresh-HR observation, establishing the trial-3 precondition. Minor GUI inspection input/capture conflicts happened before the wear trial and did not change measurement/connection settings.
+
+**Trial 3: COMPLETE NO-RECOVERY TRIAL / FAIL.**
+
+- Removal confirmed **13:46:24.054**. First screenshot at **13:46:28.179** showed Connected / HR stale, Last HR **13:46:14.561**, and status2. No charger or connection/measurement controls were used. The non-wear window through **13:48:36.185** spanned **132.131 seconds** after confirmation. Re-wear was requested after this observation; user-confirmation waiting time is not an exact removal-duration measurement.
+- Re-wear confirmed **13:49:59.421**. Screenshots at **13:50:00.095**, **13:50:55.117**, **13:51:44.101**, **13:52:31.882** and **13:53:10.486** showed Connected / HR stale and unchanged Last HR, without a native disconnect UI observation. No Scan, Disconnect, Connect, app restart, charger or protocol change occurred in this window.
+- **Untouched recovery FAIL: 191.065 seconds**, measured from confirmation receipt to the final screenshot observation. The complete no-recovery result was saved before manual recovery.
+- Separate control: Disconnect requested **13:54:09.755**, complete observed **13:54:13.269**; Connect requested **13:54:29.208**. HR, Connected and battery resumed by first observation **13:55:19.436**. Observed Connect-to-first-HR upper bound **50.228 seconds**; Disconnect-to-first-HR upper bound **69.681 seconds**. **Manual reconnect recovery PASS**. Normal HR, Connected and battery persisted through **13:56:33.902**, a **74.466-second** follow-up span, establishing the trial-4 precondition.
+
+At this resume, accessibility text/diagnostic counters could not be obtained from the helper. Current screenshot observations establish UI connection/freshness and changing Last HR; they do not establish exact packet/sample counts, internal GATT state, or perfectly healthy polling/tasks/sessions. Counts observed earlier in trial 1 are not reused for trial 3. The unchanged UI maps `Connected` to Streaming and `Connected / HR stale` to Stale; this is app state, not a native-event trace.
+
+After the user's Computer Use operation rule, each GUI action/inspection is followed by JavaScript kernel reset before ordinary waiting, records, analysis, docs or Git operations. The production Release app itself remains running; implementation is not started.
+
+### Trial 4
+
+**COMPLETE NO-RECOVERY TRIAL / FAIL.**
+
+- Removal confirmed **13:57:23.264**. First observation at **13:57:28.403** showed Connected / HR stale, Last HR **13:57:11.118**, and status2. Samples through **13:59:21.028** showed unchanged Last HR and connection state, spanning **117.764 seconds** after confirmation (approximately 120 seconds, sufficiently beyond the five-second stale threshold). User re-wear confirmation waiting time was not used to invent an exact removal duration.
+- Re-wear confirmed **14:01:01.394**. Screenshots at **14:01:06.753**, **14:02:02.664**, **14:02:54.351**, **14:03:45.470** and **14:04:22.254** showed Connected / HR stale and unchanged Last HR. No native disconnect was observed and no Scan, Disconnect, Connect, restart, charger or protocol change occurred in the recovery window.
+- **Untouched recovery FAIL: 200.860 seconds**, from confirmation receipt to final screenshot observation. This complete result was saved before manual recovery.
+- Separate control: Disconnect requested **14:04:49.001**, complete observed **14:04:52.542**; Connect requested **14:05:09.237**. Connected and battery were observed at **14:05:12.786**, before HR. Fresh HR and updating Last HR/graph were first observed **14:05:55.881**. Connect-to-first-HR observed upper bound **46.644 seconds**; Disconnect-to-first-HR upper bound **66.880 seconds**. **Manual reconnect recovery PASS**. Normal HR, Connected and battery persisted through **14:07:08.916**, a **73.035-second** sustained follow-up span.
+
+Only the three complete trials (1, 3, 4) enter the reproduction denominator. Trial 2 remains INTERRUPTED / EXCLUDED. All rates refer to this tested R06 and unchanged production Release app, with the Release observability limits above.
+
+## Complete-trial summary
+
+| Historical trial | Complete? | BLE link observation | Re-wear observation | Natural recovery | Manual reconnect | Classification |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | Yes | Connected / HR stale; no disconnect observed | 189.435 s | FAIL / none | PASS, 61.986 s sustained follow-up | COMPLETE NO-RECOVERY TRIAL |
+| 2 | No | Connected / HR stale at last observation | 66.168 s before pause | Incomplete; not a 180 s failure | Not run in trial 2 | INTERRUPTED / EXCLUDED |
+| 3 | Yes | Connected / HR stale; no disconnect observed | 191.065 s | FAIL / none | PASS, 74.466 s sustained follow-up | COMPLETE NO-RECOVERY TRIAL |
+| 4 | Yes | Connected / HR stale; no disconnect observed | 200.860 s | FAIL / none | PASS, 73.035 s sustained follow-up | COMPLETE NO-RECOVERY TRIAL |
+
+- Completed trials: **3**; excluded wear trials: **1** (historical trial 2).
+- Untouched failures: **3/3**; natural recoveries within the measured windows: **0/3**.
+- Manual reconnect recoveries with sustained HR: **3/3**.
+- The earlier worn-session-1 disconnect is a separate setup/link-loss observation, not another wear trial or measurement-session failure in this denominator.
+
+| Control trial | Disconnect request to first restored HR observation | Connect request to first restored HR observation | Sustained restored-HR span |
+| --- | --- | --- | --- |
+| 1 | 55.427 s upper bound | 38.779 s upper bound | 61.986 s |
+| 3 | 69.681 s upper bound | 50.228 s upper bound | 74.466 s |
+| 4 | 66.880 s upper bound | 46.644 s upper bound | 73.035 s |
+
+These are **UI observation upper bounds**, not exact native reconnect completion or first-valid-packet latencies. Trial 4 Connected/battery completion was first observed 3.549 seconds after Connect request; trial 1/3 connection completion was not separately timed before restored HR. Exact restored valid-sample counts are unavailable for trials 3/4 and are not inferred from graph pixels. No natural-recovery latency distribution exists in these complete trials because none recovered in-window; the latency entries above belong only to manual controls.
 
 | Condition | Status |
 | --- | --- |
 | Normal sustained HR | PASS (session 2, 82.381 s observed) |
-| Removal / prolonged stale | Trials 1/2: connected stale, polling continues |
-| Re-wear automatic recovery | Trial 1: none in 189.435 s; trial 2 interrupted; trial 3 not run |
-| Manual recovery control | Trial 1: HR restored and >60 s sustained follow-up PASS; trial 2 not run |
+| Removal / prolonged stale | Trials 1/2/3/4: connected stale; existing poll counters observed in earlier trials only |
+| Re-wear automatic recovery | Trials 1/3/4: none in 189.435 / 191.065 / 200.860 s; trial 2 excluded |
+| Manual recovery control | Trials 1/3/4: HR restored and >60 s sustained follow-up PASS |
 
 ## Decision
 
-**BASELINE DEFECT OBSERVED / COMPLETE FAILURES = 1 / IMPLEMENTATION DECISION = PENDING.** Issue10 remains OPEN. The user paused HIL during trial 2 and subsequently requested continuation with two new complete trials, numbered 3 and 4. Re-establish a normal worn baseline in the same production Release process where possible before each new trial; do not extend trial 2 across the unobserved pause or count it as a completed no-recovery trial. Prior probe worn/unworn results and unknown status02 semantics do not substitute for this production-app baseline. main/dev and Issue8 research branch remain unchanged.
+**REPRODUCIBLE DEFECT CONFIRMED / COMPLETE FAILURES = 3 OF 3 / IMPLEMENTATION = NOT STARTED.** On the tested R06 with this unchanged production Release app, repeated remove/re-wear left HR stale through each >=180-second untouched window while the UI stayed connected, and normal manual BLE reconnect restored sustained telemetry in all three controls. This confirms the production behavior; it does not identify the internal task/session/GATT cause or prove BLE reconnect is the minimal necessary recovery.
+
+Issue10 remains OPEN. Automatic recovery, status02-triggered restart, reconnect escalation, command08, timer retries and production UI changes remain unimplemented. main/dev and Issue8 research branch remain unchanged; no docs merge into main/dev is performed.
+
+The three-complete-trial baseline gate is met. The next **separate diagnostic phase** is measurement-only STOP / START / CONTINUE with the BLE link retained versus the demonstrated BLE Disconnect / Connect control. That comparison was **NOT RUN** in this baseline phase and must not be mixed into these trials or treated as an implementation decision. Preserve the unknown status02 semantics and all existing source/protocol behavior.
 
 The evidence through the pause is checkpointed on the docs-only branch at the user's explicit resume request. No publication or further HIL input occurred after the pause request and before that resume. This checkpoint is not a main/dev merge or an implementation decision.
 
-Documentation-only change; `git diff --check` passed. No runtime, project, dependency or test files changed, so no build/test rerun was needed for this evidence document. HIL is explicitly incomplete and cannot authorize automatic restart/escalation implementation.
+Documentation-only change; `git diff --check` passed. No runtime, project, dependency or test files changed, so no build/test rerun was needed for this evidence document. The requested three-complete-trial production HIL phase is complete; internal-cause and measurement-only recovery diagnostics remain separate future work. The Release process is left running after the final normal-HR control; the GUI JavaScript session is ended.
