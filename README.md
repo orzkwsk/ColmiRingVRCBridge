@@ -1,50 +1,29 @@
 # ColmiRingVRCBridge
 
-ColmiRingVRCBridgeは、スマートリングからBluetooth Low Energy（BLE）で心拍数をリアルタイムに取得し、OSCでVRChatのアバターパラメーターに送信するアプリです。
+ColmiRingVRCBridge は、COLMI などの QRing 互換スマートリングから Bluetooth Low Energy（BLE）で心拍数を取得し、OSC で VRChat のアバターパラメーターに送信します。
 
 ## 対応機材と動作環境
 
-- QRing互換スマートリングのBLE UARTプロトコルに対応しています。
-- 互換機種の **COLMI R06** で動作を確認しています。
-- Bluetooth Low Energyに対応したWindows x64 PCを使用してください。
+### 動作確認済みの機材
 
-## インストールと接続
+- リング
+  - COLMI R06
+- Android HMD
+  - PICO 4 Ultra
 
-1. リリースページの **Assets** から `ColmiRingVRCBridge-<version>-win-x64.zip` をダウンロードします。 [GitHub Releases](https://github.com/orzkwsk/ColmiRingVRCBridge/releases)
-2. ZIPを丸ごと展開し、展開先の `ColmiRingVRCBridge.exe` を起動します。ZIPには.NETランタイムが含まれています。
-3. リングをスキャンし、一覧から選択して「接続」を押します。
-4. OSC送信を始める前に、VRChat側でOSCを有効にしてください。
+### インストール先
 
-リングを着け直しても心拍数が更新されない場合は、「切断」を押してから「接続」を押してください。
+| 端末 | 動作要件 | 導入手順 |
+| --- | --- | --- |
+| Windows PC | Windows x64、BLE 対応 | [Windows 版](windows/README.md) |
+| Android HMD | Android 10 以降、BLE 対応 | [Android 版](android/README.md) |
 
-## VRChat OSC
+## 共通の OSC 設定
 
-送信先とアバターパラメーターを設定し、「送信開始」を押します。
+初期設定の送信先は `127.0.0.1:9000/UDP`、OSC アドレスは `/avatar/parameters/VRCOSC/Heartrate/Value`、OSC の型は `Int` です。VRChat で OSC を有効にし、アバターパラメーターの型をアプリの設定と揃えてください。
 
-| 設定項目 | 初期値 |
-| --- | --- |
-| 送信先 | `127.0.0.1:9000` |
-| パラメーター名 | `VRCOSC/Heartrate/Value` |
-| OSCアドレス | `/avatar/parameters/VRCOSC/Heartrate/Value` |
-| 型とスケーリング | `Int` / `Raw BPM` |
-| 送信間隔 | 1秒 |
-| 固定BPM | 50 |
-| 心拍が途切れたとき | 指定値に固定 / `0` |
+HMD 内の VRChat に送る場合は、初期設定の送信先を使います。HMD から PC 上の VRChat に送る場合は、同じネットワークに接続した PC の LAN IP アドレスを送信先に指定します。 [Android 版の OSC 設定](android/README.md#vrchat-osc)
 
-VRChat側のアバターパラメーターの型は、アプリで選択したOSCの型と揃えてください。`Int` はBPMをそのまま送信します。`Float` はBPMをそのまま送信するか、255で割った値を送信するかを選べます。型やスケーリングは、VRCパネルの「パラメーター設定」で変更できます。OSCパネルの「初期値に戻す」を押すと、送信先のホストとポートが初期値に戻ります。
-
-「固定BPMを出力」を有効にすると、設定した固定BPMを送信します。固定BPM出力が無効なときは、新しい心拍測定値が届くまで「心拍が途切れたとき」の設定に従います。
-
-- **最終値を保持** — 今回の送信で既に値を送っていれば、最後に送った値を繰り返し送信します。
-- **固定BPMに自動切り替え** — 設定した固定BPMを、選択したスケーリングで送信します。
-- **指定値に固定** — 設定した指定値を、選択したOSCの型で送信します。
-
-「送信停止」を押すと、途絶時の設定に従った値を1回送信して終了します。送信中にアプリを終了した場合も、途絶時の設定に従って最後の1回を送信します。
-
-## ローカル設定と履歴
-
-接続設定とOSC設定は `%LocalAppData%\ColmiRingVRCBridge` に保存されます。バッテリー履歴はアプリ起動中にメモリ上で保持されます。
-
-## License
+## ライセンス
 
 [MIT](LICENSE)
