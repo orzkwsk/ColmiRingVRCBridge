@@ -63,7 +63,12 @@ public final class BridgeService extends Service implements RingConnection.Liste
                     Candidate ring, String deviceInfo, int bpm, long heartAt, long heartWallTime,
                     int min, int max, int battery, boolean charging, long batteryAt,
                     List<TelemetryHistory.Point> heartHistory, List<TelemetryHistory.Point> batteryHistory,
-                    String diagnostics) {}
+                    RingDiagnostics diagnostics) {}
+
+    record RingDiagnostics(int heartPackets, int batteryPackets, int heartPolls, int heartFailures,
+                           int batteryPolls, int batteryFailures, int validPackets, int invalidPackets, String warning) {
+        static final RingDiagnostics EMPTY = new RingDiagnostics(0, 0, 0, 0, 0, 0, 0, 0, "");
+    }
 
     final class LocalBinder extends Binder {
         Snapshot snapshot() { return snapshot; }
@@ -121,9 +126,6 @@ public final class BridgeService extends Service implements RingConnection.Liste
     private ScanCallback scanCallback;
     private TelemetryHistory batteryHistory;
     private long heartWallTime;
-    private long linkStarted;
-    private long firstHeartDelay;
-    private long heartInterval;
     private int min;
     private int max;
     private int battery = -1;
@@ -431,8 +433,6 @@ public final class BridgeService extends Service implements RingConnection.Liste
             model = serial = hardware = firmware = "—";
             validCount = invalidCount = heartCount = batteryCount = 0;
             heartPollCount = batteryPollCount = heartPollFailures = batteryPollFailures = 0;
-            heartInterval = firstHeartDelay = 0;
-            linkStarted = SystemClock.elapsedRealtime();
             if (!candidate.address().equals(historyAddress)) {
                 historyAddress = candidate.address();
                 clearHeartHistory();
@@ -499,8 +499,6 @@ public final class BridgeService extends Service implements RingConnection.Liste
                 warning = "リングの計測ステータス " + sample.error();
             }
             if (sample.bpm() > 0) {
-                firstHeartDelay = heartCount == 0 ? now - linkStarted : firstHeartDelay;
-                heartInterval = heartAt == 0 ? 0 : now - heartAt;
                 heartAt = now;
                 bpm = sample.bpm();
                 heartWallTime = System.currentTimeMillis();
@@ -624,13 +622,10 @@ public final class BridgeService extends Service implements RingConnection.Liste
 
     private void publish() {
         String info = "Serial: " + serial + "    Model: " + model + "\nHW: " + hardware + "    FW: " + firmware;
-        String diagnostics = "通知  有効 " + validCount + " / 無効 " + invalidCount
-                + "\n心拍 " + heartCount + "  ·  バッテリー " + batteryCount
-                + "\n心拍ポーリング " + heartPollCount + " / 失敗 " + heartPollFailures
-                + "  ·  バッテリー " + batteryPollCount + " / 失敗 " + batteryPollFailures
-                + (heartCount > 0 ? "\n初回 BPM " + firstHeartDelay + " ms" : "")
-                + (heartInterval > 0 ? "  ·  直近の受信間隔 " + heartInterval + " ms" : "")
-                + (warning.isEmpty() ? "" : "\n" + warning);
+        RingDiagnostics diagnostics = link == Link.CONNECTED
+                ? new RingDiagnostics(heartCount, batteryCount, heartPollCount, heartPollFailures,
+                        batteryPollCount, batteryPollFailures, validCount, invalidCount, warning)
+                : RingDiagnostics.EMPTY;
         snapshot = new Snapshot(link, output, autoReconnect, ringStatus, oscError, lastOutput, candidates,
                 selected, info, bpm, heartAt, heartWallTime, min, max, battery, charging, batteryAt,
                 heartHistory.snapshot(), batteryHistory == null ? Collections.emptyList() : batteryHistory.snapshot(),
