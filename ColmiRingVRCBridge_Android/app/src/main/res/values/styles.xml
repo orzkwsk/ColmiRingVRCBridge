@@ -1,18 +1,24 @@
 <resources>
     <string name="app_name">ColmiRing VRC Bridge</string>
+    <string name="app_version">v%1$s</string>
     <string name="osc_endpoint">%1$s:%2$s</string>
-    <string name="connection_status">%1$s%2$s%3$s</string>
+    <string name="parameter_summary">%1$s / %2$s</string>
     <string name="heart_rate">%1$s BPM</string>
-    <string name="heart_received_at">最終受信 %1$s</string>
-    <string name="heart_extrema">最小 %1$s  ·  最大 %2$s</string>
-    <string name="ring_details">%1$s%2$s%3$s\n%4$s</string>
-    <string name="show_section">▸  %1$s</string>
-    <string name="hide_section">▾  %1$s</string>
-    <style name="AppTheme" parent="android:style/Theme.Material.NoActionBar">
+    <string name="heart_received_at">Last sample %1$s</string>
+    <string name="battery_percent">%1$d%%</string>
+    <string name="battery_charging">Charging %1$s</string>
+    <string name="stale_value">%1$s (stale)</string>
+    <string name="battery_history_empty">History is kept in memory while the app is open.</string>
+    <string name="battery_history_summary">%1$d%% → %2$d%%  (%3$s pp) · %4$d stored samples</string>
+    <string name="last_output">最終送信 %1$s</string>
+    <string name="ring_details">Bluetooth ID  %1$s\n%2$s\n%3$s</string>
+    <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
         <item name="android:fontFamily">sans</item>
-        <item name="android:colorAccent">#78E6C5</item>
-        <item name="android:windowBackground">#11171C</item>
-        <item name="android:statusBarColor">#11171C</item>
-        <item name="android:navigationBarColor">#11171C</item>
+        <item name="android:colorAccent">#5940B7</item>
+        <item name="android:windowBackground">#F4F2FA</item>
+        <item name="android:statusBarColor">#F4F2FA</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:navigationBarColor">#F4F2FA</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

@@ -23,15 +23,15 @@ final class OscOutput {
     private Session session;
 
     void start(BridgeSettings.Endpoint endpoint, Supplier<BridgeSettings.Values> values,
-               IntSupplier freshBpm, boolean test, Listener listener) {
+               IntSupplier freshBpm, Listener listener) {
         executor.execute(() -> {
-            Session created = new Session(endpoint, values, freshBpm, test, listener);
+            Session created = new Session(endpoint, values, freshBpm, listener);
             session = created;
             try {
                 created.address = InetAddress.getByName(endpoint.host());
                 created.socket = new DatagramSocket();
                 created.ticks = executor.scheduleWithFixedDelay(created::tick, 0,
-                        test ? 3_000 : endpoint.periodMs(), TimeUnit.MILLISECONDS);
+                        endpoint.periodMs(), TimeUnit.MILLISECONDS);
             } catch (IOException | IllegalArgumentException | SecurityException ex) {
                 finish(created, ex);
             }
@@ -76,31 +76,23 @@ final class OscOutput {
         final BridgeSettings.Endpoint endpoint;
         final Supplier<BridgeSettings.Values> values;
         final IntSupplier freshBpm;
-        final boolean test;
         final Listener listener;
         InetAddress address;
         DatagramSocket socket;
         ScheduledFuture<?> ticks;
         Number lastSent;
-        int nextTest = 75;
 
         Session(BridgeSettings.Endpoint endpoint, Supplier<BridgeSettings.Values> values,
-                IntSupplier freshBpm, boolean test, Listener listener) {
+                IntSupplier freshBpm, Listener listener) {
             this.endpoint = endpoint;
             this.values = values;
             this.freshBpm = freshBpm;
-            this.test = test;
             this.listener = listener;
         }
 
         void tick() {
             try {
-                if (test) {
-                    send(endpoint.fromBpm(nextTest));
-                    nextTest = nextTest == 75 ? 90 : 75;
-                } else {
-                    send(values.get().select(endpoint, freshBpm.getAsInt(), lastSent));
-                }
+                send(values.get().select(endpoint, freshBpm.getAsInt(), lastSent));
             } catch (IOException | IllegalArgumentException | SecurityException ex) {
                 finish(this, ex);
             }

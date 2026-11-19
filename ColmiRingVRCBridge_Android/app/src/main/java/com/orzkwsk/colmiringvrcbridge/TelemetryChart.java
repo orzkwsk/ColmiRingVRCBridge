@@ -35,10 +35,10 @@ final class TelemetryChart extends View {
         super.onDraw(canvas);
         long range = battery ? TelemetryHistory.BATTERY_GRAPH_MS : TelemetryHistory.HEART_GRAPH_MS;
         long start = now - range;
-        float left = dp(40);
-        float top = dp(14);
-        float right = getWidth() - dp(12);
-        float bottom = getHeight() - dp(26);
+        float left = dp(battery ? 34 : 30);
+        float top = dp(8);
+        float right = getWidth() - dp(8);
+        float bottom = getHeight() - dp(battery ? 20 : 8);
         if (right <= left || bottom <= top) {
             return;
         }
@@ -62,12 +62,14 @@ final class TelemetryChart extends View {
         }
 
         paint.setStyle(Paint.Style.FILL);
+        paint.setColor(MainActivity.INSET);
+        canvas.drawRoundRect(battery ? 0 : left, 0, getWidth(), getHeight(), dp(4), dp(4), paint);
         if (battery) {
             for (int i = first; i < points.size(); i++) {
                 TelemetryHistory.Point point = points.get(i);
                 long next = i + 1 < points.size() ? points.get(i + 1).elapsed() : now;
                 if (point.charging() && next - point.elapsed() <= 30 * 60_000L) {
-                    paint.setColor(0x2278E6C5);
+                    paint.setColor(0x225940B7);
                     canvas.drawRect(x(point.elapsed(), start, range, left, right), top,
                             x(next, start, range, left, right), bottom, paint);
                 }
@@ -78,26 +80,29 @@ final class TelemetryChart extends View {
         paint.setStrokeWidth(dp(1));
         for (int line = 0; line <= 2; line++) {
             float y = top + (bottom - top) * line / 2f;
-            paint.setColor(0xFF30414A);
+            paint.setColor(MainActivity.LINE);
             canvas.drawLine(left, y, right, y, paint);
-            paint.setColor(0xFFADC2CE);
+            paint.setColor(MainActivity.MUTED);
             paint.setTextAlign(Paint.Align.RIGHT);
             int scaleValue = high - (high - low) * line / 2;
             canvas.drawText(scaleValue + (battery ? "%" : ""), left - dp(6), y + dp(4), paint);
         }
-        paint.setTextAlign(Paint.Align.LEFT);
-        canvas.drawText(battery ? "−24 h" : "−60 s", left, bottom + dp(17), paint);
-        paint.setTextAlign(Paint.Align.RIGHT);
-        canvas.drawText("現在", right, bottom + dp(17), paint);
+        if (battery) {
+            paint.setTextAlign(Paint.Align.LEFT);
+            canvas.drawText("-24 h", left, bottom + dp(15), paint);
+            paint.setTextAlign(Paint.Align.RIGHT);
+            canvas.drawText("Now", right, bottom + dp(15), paint);
+        }
 
         if (first >= points.size()) {
             paint.setTextAlign(Paint.Align.CENTER);
-            canvas.drawText("データ待ち", (left + right) / 2, (top + bottom) / 2 - dp(8), paint);
+            String empty = battery ? "No battery history yet" : "Waiting for heart-rate samples…";
+            canvas.drawText(empty, (left + right) / 2, (top + bottom) / 2, paint);
             return;
         }
 
         path.reset();
-        paint.setColor(0xFF78E6C5);
+        paint.setColor(MainActivity.ACCENT);
         paint.setStyle(Paint.Style.FILL);
         long previous = Long.MIN_VALUE;
         for (int i = first; i < points.size(); i++) {

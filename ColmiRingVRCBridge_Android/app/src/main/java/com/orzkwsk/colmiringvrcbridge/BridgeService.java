@@ -43,15 +43,13 @@ public final class BridgeService extends Service implements RingConnection.Liste
     static final String RESUME = "resume";
     static final String RECONNECT_ON = "reconnect-on";
     static final String OUTPUT = "output";
-    static final String TEST = "test";
-    private static final String STOP = "stop";
     private static final String CHANNEL = "bridge";
     private static final ParcelUuid UART_ADVERTISEMENT = new ParcelUuid(RingProtocol.UART);
-    private static final long HEART_FRESH_MS = 5_000;
+    static final long HEART_FRESH_MS = 5_000;
     private static final Pattern RING_NAME = Pattern.compile("R(02|03|06|09|10|12).*");
 
     enum Link { IDLE, SCANNING, CONNECTING, RECONNECTING, CONNECTED, DISCONNECTING }
-    enum Output { IDLE, SENDING, TESTING, STOPPING }
+    enum Output { IDLE, SENDING, STOPPING }
 
     record Candidate(String address, String name, int rssi, boolean likelyRing) {
         String label() {
@@ -60,8 +58,8 @@ public final class BridgeService extends Service implements RingConnection.Liste
         }
     }
 
-    record Snapshot(Link link, Output output, boolean stopping, boolean autoReconnect,
-                    String ringStatus, String oscStatus, String lastOutput, List<Candidate> candidates,
+    record Snapshot(Link link, Output output, boolean autoReconnect,
+                    String ringStatus, String oscError, String lastOutput, List<Candidate> candidates,
                     Candidate ring, String deviceInfo, int bpm, long heartAt, long heartWallTime,
                     int min, int max, int battery, boolean charging, long batteryAt,
                     List<TelemetryHistory.Point> heartHistory, List<TelemetryHistory.Point> batteryHistory,
@@ -74,12 +72,12 @@ public final class BridgeService extends Service implements RingConnection.Liste
         void resetHeartHistory() { worker.post(() -> { clearHeartHistory(); publish(); }); }
         void setAutoReconnect(boolean value) { worker.post(() -> changeAutoReconnect(value)); }
         void updateValues() { worker.post(() -> outputValues = BridgeSettings.load(prefs).values()); }
-        void stopBridge() { worker.post(() -> stopEverything()); }
     }
 
     private final LocalBinder binder = new LocalBinder();
     private final Handler main = new Handler(android.os.Looper.getMainLooper());
     private final OscOutput osc = new OscOutput();
+    private final java.text.DateFormat outputClock = new java.text.SimpleDateFormat("HH:mm:ss", Locale.ROOT);
     private final Map<String, Candidate> discoveries = new HashMap<>();
     private final TelemetryHistory heartHistory = new TelemetryHistory(false);
     private final Map<String, TelemetryHistory> batteryHistories = new HashMap<>();
@@ -100,15 +98,14 @@ public final class BridgeService extends Service implements RingConnection.Liste
     private int workerStartId;
     private boolean foreground;
     private boolean destroyed;
-    private boolean stopping;
-    private boolean scanAll;
     private boolean autoReconnect;
     private boolean paused;
     private boolean resumed;
+    private Runnable afterReconnectCancellation;
     private Link link = Link.IDLE;
     private Output output = Output.IDLE;
     private String ringStatus = "未接続";
-    private String oscStatus = "停止中";
+    private String oscError;
     private String lastOutput = "";
     private String model = "—";
     private String serial = "—";
@@ -183,10 +180,6 @@ public final class BridgeService extends Service implements RingConnection.Liste
             return START_NOT_STICKY;
         }
         String action = intent.getAction();
-        if (STOP.equals(action) && !foreground) {
-            stopSelfResult(startId);
-            return START_NOT_STICKY;
-        }
         if (!foreground) {
             if (!hasBluetoothPermission(this)) {
                 stopSelfResult(startId);
@@ -207,12 +200,10 @@ public final class BridgeService extends Service implements RingConnection.Liste
         mainStartId = startId;
         worker.post(() -> {
             workerStartId = startId;
-            if (STOP.equals(action)) {
-                stopEverything();
-            } else if (!stopping && action != null) {
+            if (action != null) {
                 switch (action) {
                     case SCAN:
-                        scan(intent.getBooleanExtra("all", false));
+                        scan();
                         break;
                     case CONNECT:
                         String address = intent.getStringExtra("address");
@@ -229,8 +220,7 @@ public final class BridgeService extends Service implements RingConnection.Liste
                         changeAutoReconnect(true);
                         break;
                     case OUTPUT:
-                    case TEST:
-                        startOsc(TEST.equals(action));
+                        startOsc();
                         break;
                     default:
                         break;
@@ -249,7 +239,6 @@ public final class BridgeService extends Service implements RingConnection.Liste
         int flags = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT;
         PendingIntent open = PendingIntent.getActivity(this, 0, new Intent(this, MainActivity.class)
                 .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP), flags);
-        PendingIntent stop = PendingIntent.getService(this, 0, new Intent(this, BridgeService.class).setAction(STOP), flags);
         Notification notification = new Notification.Builder(this, CHANNEL)
                 .setSmallIcon(R.drawable.ic_ring)
                 .setContentTitle(getString(R.string.app_name))
@@ -257,7 +246,6 @@ public final class BridgeService extends Service implements RingConnection.Liste
                 .setContentIntent(open)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
-                .addAction(new Notification.Action.Builder(null, "ブリッジを停止", stop).build())
                 .build();
         startForeground(1, notification);
         foreground = true;
@@ -268,8 +256,6 @@ public final class BridgeService extends Service implements RingConnection.Liste
         if (link != Link.IDLE || output != Output.IDLE || retryScheduled) {
             return;
         }
-        stopping = false;
-        publish();
         int idleStartId = workerStartId;
         if (idleStartId == 0) {
             return;
@@ -283,14 +269,18 @@ public final class BridgeService extends Service implements RingConnection.Liste
         });
     }
 
-    private void scan(boolean includeAll) {
-        if (link != Link.IDLE && link != Link.SCANNING) {
+    private void scan() {
+        if (link == Link.RECONNECTING) {
+            // A manual search takes over from the retry, as on Windows.
+            cancelReconnectFor(this::scan);
+            return;
+        }
+        if (link != Link.IDLE) {
             return;
         }
         worker.removeCallbacks(retry);
         stopScan();
         paused = true;
-        scanAll = includeAll;
         discoveries.clear();
         scanCallback = new ScanCallback() {
             @Override
@@ -357,7 +347,7 @@ public final class BridgeService extends Service implements RingConnection.Liste
         stopScan();
         List<Candidate> found = new ArrayList<>();
         for (Candidate candidate : discoveries.values()) {
-            if (scanAll || candidate.likelyRing()) {
+            if (candidate.likelyRing()) {
                 found.add(candidate);
             }
         }
@@ -371,7 +361,7 @@ public final class BridgeService extends Service implements RingConnection.Liste
         candidates = Collections.unmodifiableList(found);
         link = Link.IDLE;
         ringStatus = error != null ? error : !foundDevices
-                ? "候補が見つかりません。「すべての BLE デバイス」を試してください"
+                ? "リングの候補が見つかりません"
                 : "検索完了 · リングを選択してください";
         paused = foundDevices;
         scheduleRetry();
@@ -410,13 +400,17 @@ public final class BridgeService extends Service implements RingConnection.Liste
 
     private void scheduleRetry() {
         worker.removeCallbacks(retry);
-        if (!stopping && autoReconnect && !paused && remembered != null && link == Link.IDLE) {
+        if (autoReconnect && !paused && remembered != null && link == Link.IDLE) {
             worker.postDelayed(retry, 1_000);
         }
     }
 
     private void connect(Candidate candidate, boolean automatic) {
-        if (candidate == null || stopping || link != Link.IDLE) {
+        if (!automatic && link == Link.RECONNECTING) {
+            cancelReconnectFor(() -> connect(candidate, false));
+            return;
+        }
+        if (candidate == null || link != Link.IDLE) {
             return;
         }
         worker.removeCallbacks(retry);
@@ -453,6 +447,11 @@ public final class BridgeService extends Service implements RingConnection.Liste
             publish();
             idleIfDone();
         }
+    }
+
+    private void cancelReconnectFor(Runnable next) {
+        afterReconnectCancellation = next;
+        disconnectRing();
     }
 
     private void disconnectRing() {
@@ -554,6 +553,14 @@ public final class BridgeService extends Service implements RingConnection.Liste
         heartWallTime = 0;
         battery = -1;
         selected = null;
+        Runnable next = afterReconnectCancellation;
+        afterReconnectCancellation = null;
+        if (next != null) {
+            next.run();
+            publish();
+            idleIfDone();
+            return;
+        }
         if (!manual) {
             scheduleRetry();
         }
@@ -572,22 +579,22 @@ public final class BridgeService extends Service implements RingConnection.Liste
         return at != 0 && SystemClock.elapsedRealtime() - at <= HEART_FRESH_MS ? current.bpm() : 0;
     }
 
-    private void startOsc(boolean test) {
+    private void startOsc() {
         if (output != Output.IDLE) {
             return;
         }
         try {
             BridgeSettings.Output settings = BridgeSettings.load(prefs);
-            BridgeSettings.Endpoint endpoint = settings.endpoint(test);
+            BridgeSettings.Endpoint endpoint = settings.endpoint();
             outputValues = settings.values();
-            output = test ? Output.TESTING : Output.SENDING;
-            oscStatus = test ? "経路テスト中 · 75 / 90 BPM" : "送信中";
+            output = Output.SENDING;
+            oscError = null;
             lastOutput = "";
-            osc.start(endpoint, () -> outputValues, this::freshBpm, test, new OscOutput.Listener() {
+            osc.start(endpoint, () -> outputValues, this::freshBpm, new OscOutput.Listener() {
                 @Override
                 public void onSent(Number value) {
                     worker.post(() -> {
-                        lastOutput = value + "  →  " + endpoint.address();
+                        lastOutput = value + " · " + outputClock.format(new java.util.Date());
                         publish();
                     });
                 }
@@ -596,35 +603,27 @@ public final class BridgeService extends Service implements RingConnection.Liste
                 public void onStopped(String error) {
                     worker.post(() -> {
                         output = Output.IDLE;
-                        oscStatus = error == null ? "停止中" : error;
+                        oscError = error;
                         publish();
                         idleIfDone();
                     });
                 }
             });
         } catch (IllegalArgumentException ex) {
-            oscStatus = ex.getMessage();
+            oscError = ex.getMessage();
         }
     }
 
     private void stopOsc() {
-        if (output == Output.SENDING || output == Output.TESTING) {
+        if (output == Output.SENDING) {
             output = Output.STOPPING;
-            oscStatus = "停止中…";
             osc.stop();
             publish();
         }
     }
 
-    private void stopEverything() {
-        stopping = true;
-        stopOsc();
-        disconnectRing();
-        idleIfDone();
-    }
-
     private void publish() {
-        String info = "モデル " + model + "  ·  シリアル " + serial + "\nFW " + firmware + "  ·  HW " + hardware;
+        String info = "Serial: " + serial + "    Model: " + model + "\nHW: " + hardware + "    FW: " + firmware;
         String diagnostics = "通知  有効 " + validCount + " / 無効 " + invalidCount
                 + "\n心拍 " + heartCount + "  ·  バッテリー " + batteryCount
                 + "\n心拍ポーリング " + heartPollCount + " / 失敗 " + heartPollFailures
@@ -632,7 +631,7 @@ public final class BridgeService extends Service implements RingConnection.Liste
                 + (heartCount > 0 ? "\n初回 BPM " + firstHeartDelay + " ms" : "")
                 + (heartInterval > 0 ? "  ·  直近の受信間隔 " + heartInterval + " ms" : "")
                 + (warning.isEmpty() ? "" : "\n" + warning);
-        snapshot = new Snapshot(link, output, stopping, autoReconnect, ringStatus, oscStatus, lastOutput, candidates,
+        snapshot = new Snapshot(link, output, autoReconnect, ringStatus, oscError, lastOutput, candidates,
                 selected, info, bpm, heartAt, heartWallTime, min, max, battery, charging, batteryAt,
                 heartHistory.snapshot(), batteryHistory == null ? Collections.emptyList() : batteryHistory.snapshot(),
                 diagnostics);
@@ -642,7 +641,8 @@ public final class BridgeService extends Service implements RingConnection.Liste
     public void onDestroy() {
         destroyed = true;
         worker.post(() -> {
-            stopping = true;
+            worker.removeCallbacks(retry);
+            afterReconnectCancellation = null;
             stopScan();
             if (connection != null) {
                 connection.closeNow();

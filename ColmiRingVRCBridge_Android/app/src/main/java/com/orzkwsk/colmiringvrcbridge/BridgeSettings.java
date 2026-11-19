@@ -19,8 +19,11 @@ final class BridgeSettings {
             return PREFIX + name.replaceFirst("^/+", "");
         }
 
-        Endpoint endpoint(boolean test) {
+        Endpoint endpoint() {
             String hostname = host.trim();
+            if (hostname.matches("(?:[0-9]{1,3}\\.){3}")) {
+                throw new IllegalArgumentException("PC の IP アドレスの最後の数字を入力してください");
+            }
             if (hostname.isEmpty() || hostname.contains("/") || hostname.chars().anyMatch(Character::isWhitespace)) {
                 throw new IllegalArgumentException("OSC 送信先に IP アドレスまたはホスト名を入力してください");
             }
@@ -44,14 +47,12 @@ final class BridgeSettings {
             if (!Double.isFinite(seconds) || seconds < 0.05 || seconds > 4_294_967.294) {
                 throw new IllegalArgumentException("送信間隔は 0.05〜4294967.294 秒を入力してください");
             }
-            if (!test) {
-                Values values = values();
-                if ((useFixed || loss == Loss.FIXED) && values.fixedBpm() == null) {
-                    throw new IllegalArgumentException("固定BPMに整数を入力してください");
-                }
-                if (!useFixed && loss == Loss.SPECIFIED && values.specified() == null) {
-                    throw new IllegalArgumentException("途絶時の指定値を、選択したOSC型に合う数値で入力してください");
-                }
+            Values values = values();
+            if ((useFixed || loss == Loss.FIXED) && values.fixedBpm() == null) {
+                throw new IllegalArgumentException("固定BPMに整数を入力してください");
+            }
+            if (!useFixed && loss == Loss.SPECIFIED && values.specified() == null) {
+                throw new IllegalArgumentException("途絶時の指定値を、選択したOSC型に合う数値で入力してください");
             }
             return new Endpoint(hostname, portNumber, address, floating, floating && normalize,
                     Math.round(seconds * 1_000));
